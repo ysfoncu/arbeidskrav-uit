@@ -101,7 +101,8 @@ const SUBS_INIT: Submission[] = [
     body: "",
     deliveryStatus: "missing",
     assessmentStatus: "not_assessed",
-    deadline: "2026-07-05",
+    // Demo data: always a week out so a fresh submission is never "late".
+    deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     submittedAt: null,
     finalComment: null,
     resubmissionMessage: null,
@@ -2761,8 +2762,9 @@ function StudentView({
           </div>
         )}
 
-        {/* Awaiting-review notice */}
-        {!viewingPast && sub.assessmentStatus === "not_assessed" && sub.deliveryStatus === "submitted" && (
+        {/* Awaiting-review notice — any delivered, not-yet-assessed submission
+            (first submission may be "late", resubmissions are "submitted") */}
+        {!viewingPast && sub.assessmentStatus === "not_assessed" && sub.submittedAt !== null && !excused && (
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start", backgroundColor: "#EAE6FF", border: "1px solid #998DD9", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
             <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1.4 }}>⏳</span>
             <p style={{ margin: 0, fontSize: 12, color: "#403294", lineHeight: 1.5, flex: 1 }}>
