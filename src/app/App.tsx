@@ -752,6 +752,9 @@ function TeacherDetail({
   showAnnHint,
   onDismissAnnHint,
   onToast,
+  mobileSidebarOpen,
+  onMobileSidebarOpen,
+  onMobileSidebarClose,
 }: {
   submissionId: string;
   submissions: Submission[];
@@ -771,6 +774,9 @@ function TeacherDetail({
   showAnnHint: boolean;
   onDismissAnnHint: () => void;
   onToast: (type: Toast["type"], message: string) => void;
+  mobileSidebarOpen: boolean;
+  onMobileSidebarOpen: () => void;
+  onMobileSidebarClose: () => void;
 }) {
   const sub = submissions.find((s) => s.id === submissionId)!;
   const student = getUser(sub.studentId);
@@ -833,6 +839,7 @@ function TeacherDetail({
   const handleAnnTextClick = (annId: string) => {
     if (viewingPast) return;
     setSidebarView("annotations");
+    onMobileSidebarOpen();
     focusAnn(annId);
   };
 
@@ -1125,7 +1132,10 @@ function TeacherDetail({
                       <span style={{ fontSize: 12, color: "#172B4D", fontWeight: 600 }}>{v.label}</span>
                       <Lozenge status={deliveryChipStatus(sub)} />
                       <button
-                        onClick={() => setSidebarView("grading")}
+                        onClick={() => {
+                          setSidebarView("grading");
+                          onMobileSidebarOpen();
+                        }}
                         title="Open the Grading tab"
                         style={{
                           fontSize: 11,
@@ -1221,7 +1231,7 @@ function TeacherDetail({
           {/* ── Action bar — picks what the right sidebar shows. Styled after
                  the Atlassian Design System Tabs component: sentence-case
                  labels on a shared divider line, selected tab underlined. ── */}
-          <div className="no-print" style={{ display: "flex", alignItems: "center", marginBottom: 20, borderBottom: "2px solid #DFE1E6" }}>
+          <div className={`no-print${mobileSidebarOpen ? "" : " drawer-closed"}`} style={{ display: "flex", alignItems: "center", marginBottom: 20, borderBottom: "2px solid #DFE1E6" }}>
             {([
               { key: "activities", label: "🕘 Activities" },
               { key: "annotations", label: "✎ Annotations" },
@@ -1240,6 +1250,7 @@ function TeacherDetail({
               return (
                 <button
                   key={a.key}
+                  className={active ? "sidebar-tab-active" : undefined}
                   disabled={disabled}
                   title={
                     !disabled
@@ -1252,7 +1263,11 @@ function TeacherDetail({
                       ? "Already requested — waiting for the student to resubmit"
                       : "The submission has been graded — undo grading first"
                   }
-                  onClick={() => setSidebarView(a.key)}
+                  onClick={() => {
+                    setSidebarView(a.key);
+                    // On mobile the sidebar is a drawer — picking a view opens it.
+                    onMobileSidebarOpen();
+                  }}
                   onMouseEnter={(e) => {
                     if (!disabled && !active) (e.currentTarget as HTMLElement).style.color = "#0052CC";
                   }}
@@ -1279,7 +1294,7 @@ function TeacherDetail({
                 >
                   {a.label}
                   {a.key === "annotations" && count > 0 && (
-                    <span style={{ backgroundColor: active ? "#DEEBFF" : "#DFE1E6", color: active ? "#0052CC" : "#42526E", borderRadius: 10, fontSize: 11, padding: "1px 7px", fontWeight: 700 }}>
+                    <span className="tab-count" style={{ backgroundColor: active ? "#DEEBFF" : "#DFE1E6", color: active ? "#0052CC" : "#42526E", borderRadius: 10, fontSize: 11, padding: "1px 7px", fontWeight: 700 }}>
                       {count}
                     </span>
                   )}
@@ -1466,7 +1481,7 @@ function TeacherDetail({
         {/* ── Right: sidebar (hidden while comparing versions) ── */}
         {!viewingPast && (
         <div
-          className="no-print"
+          className={`no-print app-sidebar${mobileSidebarOpen ? " mobile-open" : ""}`}
           style={{
             width: 340,
             flexShrink: 0,
@@ -1478,14 +1493,25 @@ function TeacherDetail({
           }}
         >
           {/* Panel title — the action bar above the canvas picks the view */}
-          <div style={{ padding: "11px 16px", borderBottom: "1px solid #DFE1E6", flexShrink: 0, fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#42526E" }}>
-            {sidebarView === "annotations"
-              ? "Annotations & comments"
-              : sidebarView === "grading"
-              ? "Grading"
-              : sidebarView === "activities"
-              ? "Activities"
-              : "Request resubmission"}
+          <div style={{ padding: "11px 16px", borderBottom: "1px solid #DFE1E6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#42526E" }}>
+              {sidebarView === "annotations"
+                ? "Annotations & comments"
+                : sidebarView === "grading"
+                ? "Grading"
+                : sidebarView === "activities"
+                ? "Activities"
+                : "Request resubmission"}
+            </span>
+            {/* Mobile only: closes the drawer */}
+            <button
+              className="mobile-sidebar-close"
+              onClick={onMobileSidebarClose}
+              title="Close panel"
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#42526E", fontSize: 16, lineHeight: 1, padding: "0 2px", fontFamily: "inherit", alignItems: "center" }}
+            >
+              ✕
+            </button>
           </div>
 
           {/* Sidebar content */}
@@ -2277,6 +2303,8 @@ function FeedbackSidebar({
   registerCard,
   onAnnEditStart,
   onAnnEditSave,
+  mobileOpen = false,
+  onMobileClose,
 }: {
   sub: Submission;
   subAnns: Annotation[];
@@ -2289,6 +2317,8 @@ function FeedbackSidebar({
   // it there); save writes the new text back into the editor.
   onAnnEditStart?: (ann: Annotation) => string | null;
   onAnnEditSave?: (ann: Annotation, newText: string) => void;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }) {
   const feedCount = subAnns.length + subComs.length;
   // Card currently in passage-edit mode (revision only).
@@ -2317,6 +2347,7 @@ function FeedbackSidebar({
 
   return (
     <div
+      className={`no-print app-sidebar${mobileOpen ? " mobile-open" : ""}`}
       style={{
         width: 340,
         flexShrink: 0,
@@ -2341,11 +2372,22 @@ function FeedbackSidebar({
         <span style={{ fontSize: 12, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em" }}>
           Feedback
         </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          {/* Mobile only: closes the drawer */}
+          <button
+            className="mobile-sidebar-close"
+            onClick={onMobileClose}
+            title="Close feedback"
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#42526E", fontSize: 16, lineHeight: 1, padding: "0 2px", fontFamily: "inherit", alignItems: "center", order: 2 }}
+          >
+            ✕
+          </button>
         {released && feedCount > 0 && (
           <span style={{ backgroundColor: "#DFE1E6", color: "#42526E", borderRadius: 10, fontSize: 10, padding: "1px 7px", fontWeight: 700 }}>
             {feedCount}
           </span>
         )}
+        </span>
       </div>
 
       {/* Content */}
@@ -2552,6 +2594,8 @@ function StudentView({
   comments,
   onSubmit,
   onResubmit,
+  mobileSidebarOpen,
+  onMobileSidebarClose,
 }: {
   submissionId: string;
   submissions: Submission[];
@@ -2559,6 +2603,8 @@ function StudentView({
   comments: Comment[];
   onSubmit: (id: string, body: string) => void;
   onResubmit: (id: string, body: string) => void;
+  mobileSidebarOpen: boolean;
+  onMobileSidebarClose: () => void;
 }) {
   const sub = submissions.find((s) => s.id === submissionId)!;
   // Which version is on screen: null = current, otherwise an archived one.
@@ -2939,6 +2985,8 @@ function StudentView({
         registerCard={registerCard}
         onAnnEditStart={revising && !viewingPast ? handleAnnEditStart : undefined}
         onAnnEditSave={revising && !viewingPast ? handleAnnEditSave : undefined}
+        mobileOpen={mobileSidebarOpen}
+        onMobileClose={onMobileSidebarClose}
       />
     </div>
   );
@@ -2951,12 +2999,16 @@ function SupervisorView({
   annotations,
   comments,
   onChangeSubmission,
+  mobileSidebarOpen,
+  onMobileSidebarClose,
 }: {
   submissionId: string;
   submissions: Submission[];
   annotations: Annotation[];
   comments: Comment[];
   onChangeSubmission: (id: string) => void;
+  mobileSidebarOpen: boolean;
+  onMobileSidebarClose: () => void;
 }) {
   const sub = submissions.find((s) => s.id === submissionId)!;
   // Which version is on screen: null = current, otherwise an archived one.
@@ -3098,7 +3150,7 @@ function SupervisorView({
       </div>
 
       {/* ── Right: feedback sidebar ── */}
-      <FeedbackSidebar sub={sub} subAnns={subAnns} subComs={subComs} focusedAnnId={focusedAnnId} registerCard={registerCard} />
+      <FeedbackSidebar sub={sub} subAnns={subAnns} subComs={subComs} focusedAnnId={focusedAnnId} registerCard={registerCard} mobileOpen={mobileSidebarOpen} onMobileClose={onMobileSidebarClose} />
     </div>
   );
 }
@@ -3113,6 +3165,8 @@ export default function App() {
   const [teacherDropOpen, setTeacherDropOpen] = useState(false);
   const [studentDropOpen, setStudentDropOpen] = useState(false);
   const [showAnnHint, setShowAnnHint] = useState(true);
+  // Mobile only: the right sidebar is a drawer toggled from the page header.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [submissions, setSubmissions] = useState<Submission[]>(SUBS_INIT);
   const [annotations, setAnnotations] = useState<Annotation[]>(ANNS_INIT);
   const [comments, setComments] = useState<Comment[]>(COMS_INIT);
@@ -3308,6 +3362,36 @@ export default function App() {
           }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
+        /* Mobile: the right sidebar collapses into a slide-in drawer toggled
+           by a floating button (hidden on desktop). !important beats the
+           components' inline styles. */
+        .mobile-sidebar-toggle { display: none; }
+        .mobile-sidebar-close { display: none; }
+        @media (max-width: 768px) {
+          .app-sidebar { display: none !important; }
+          .app-sidebar.mobile-open {
+            display: flex !important;
+            position: fixed !important;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: clamp(300px, 66.67vw, 560px) !important;
+            z-index: 600;
+            box-shadow: -8px 0 24px rgba(9,30,66,0.35);
+          }
+          .mobile-sidebar-toggle { display: flex !important; }
+          .mobile-sidebar-close { display: inline-flex !important; }
+          /* With the drawer closed, no tab is "showing" — drop the active
+             highlight until the overlay is actually open. */
+          .drawer-closed .sidebar-tab-active {
+            color: #44546F !important;
+            border-bottom-color: transparent !important;
+          }
+          .drawer-closed .sidebar-tab-active .tab-count {
+            background-color: #DFE1E6 !important;
+            color: #42526E !important;
+          }
+        }
       `}</style>
 
       {/* ── Top navigation ── */}
@@ -3372,6 +3456,7 @@ export default function App() {
                 setTeacherDropOpen(false);
                 setSupDropOpen(false);
                 setStudentDropOpen(false);
+                setMobileSidebarOpen(false);
               }}
               style={{
                 padding: "4px 14px",
@@ -3530,11 +3615,34 @@ export default function App() {
             );
         })()}
         <div style={{ flex: 1 }} />
-        {role === "teacher" && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {role === "teacher" && (
             <Btn variant="default" small onClick={() => window.print()}>↓ Download PDF</Btn>
-          </div>
-        )}
+          )}
+          {/* Mobile only: opens the right sidebar drawer */}
+          <button
+            className="mobile-sidebar-toggle"
+            onClick={() => setMobileSidebarOpen(true)}
+            title="Open panel"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 3,
+              border: "1px solid #DFE1E6",
+              backgroundColor: "#fff",
+              color: "#42526E",
+              fontSize: 18,
+              fontWeight: 700,
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              flexShrink: 0,
+            }}
+          >
+            ⋮
+          </button>
+        </div>
       </div>
 
       {/* ── Main content ── */}
@@ -3568,6 +3676,9 @@ export default function App() {
               showAnnHint={showAnnHint}
               onDismissAnnHint={() => setShowAnnHint(false)}
               onToast={addToast}
+              mobileSidebarOpen={mobileSidebarOpen}
+              onMobileSidebarOpen={() => setMobileSidebarOpen(true)}
+              onMobileSidebarClose={() => setMobileSidebarOpen(false)}
             />
         )}
 
@@ -3580,6 +3691,8 @@ export default function App() {
             comments={comments}
             onSubmit={handleStudentSubmit}
             onResubmit={handleStudentResubmit}
+            mobileSidebarOpen={mobileSidebarOpen}
+            onMobileSidebarClose={() => setMobileSidebarOpen(false)}
           />
         )}
 
@@ -3590,6 +3703,8 @@ export default function App() {
             annotations={annotations}
             comments={comments}
             onChangeSubmission={setSupervisorSubId}
+            mobileSidebarOpen={mobileSidebarOpen}
+            onMobileSidebarClose={() => setMobileSidebarOpen(false)}
           />
         )}
       </div>
