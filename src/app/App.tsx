@@ -823,11 +823,8 @@ function TeacherDetail({
   // What the right sidebar shows, driven by the action bar above the canvas.
   // Activities is the default; annotating is only allowed on Annotations.
   const [sidebarView, setSidebarView] = useState<
-    "activities" | "annotations" | "grading" | "resubmission"
+    "activities" | "annotations" | "grading"
   >("activities");
-  // Message the teacher writes when requesting a resubmission.
-  const [resubMessage, setResubMessage] = useState("");
-  const [resubError, setResubError] = useState(false);
   // Inline editing of a feed card (annotation note / comment text).
   const [editing, setEditing] = useState<
     { kind: "annotation" | "comment"; id: string; text: string } | null
@@ -850,8 +847,6 @@ function TeacherDetail({
     setAnnTypePopover(null);
     setAnnPopover(null);
     setSidebarView("activities");
-    setResubMessage("");
-    setResubError(false);
     setEditing(null);
     setViewVersion(null);
   }, [submissionId]);
@@ -1236,15 +1231,12 @@ function TeacherDetail({
               { key: "activities", label: "🕘 Activities" },
               { key: "annotations", label: "✎ Annotations" },
               { key: "grading", label: "✓ Grading" },
-              { key: "resubmission", label: "↩ Request resubmission" },
             ] as const).map((a) => {
               // Activities and Grading are always available (the teacher can
               // review the timeline or set a status — e.g. Excused — before
-              // anything is submitted); the rest need a submission first.
+              // anything is submitted); Annotations needs a submission first.
               const disabled =
-                viewingPast ||
-                (!sub.submittedAt && (a.key === "annotations" || a.key === "resubmission")) ||
-                (a.key === "resubmission" && (awaitingResubmission || !canAssess));
+                viewingPast || (!sub.submittedAt && a.key === "annotations");
               const active = sidebarView === a.key && !disabled;
               const count = subAnns.length + subComs.length;
               return (
@@ -1257,11 +1249,7 @@ function TeacherDetail({
                       ? undefined
                       : viewingPast
                       ? "Unavailable while viewing a previous version"
-                      : !sub.submittedAt
-                      ? "Available once the student has submitted"
-                      : awaitingResubmission
-                      ? "Already requested — waiting for the student to resubmit"
-                      : "The submission has been graded — undo grading first"
+                      : "Available once the student has submitted"
                   }
                   onClick={() => {
                     setSidebarView(a.key);
@@ -1499,9 +1487,7 @@ function TeacherDetail({
                 ? "Annotations & comments"
                 : sidebarView === "grading"
                 ? "Grading"
-                : sidebarView === "activities"
-                ? "Activities"
-                : "Request resubmission"}
+                : "Activities"}
             </span>
             {/* Mobile only: closes the drawer */}
             <button
@@ -1516,9 +1502,9 @@ function TeacherDetail({
 
           {/* Sidebar content */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
-            {!sub.submittedAt && (sidebarView === "annotations" || sidebarView === "resubmission") ? (
-              /* Annotating and resubmission requests need a submission;
-                 Activities and Grading are available from assignment onwards. */
+            {!sub.submittedAt && sidebarView === "annotations" ? (
+              /* Annotating needs a submission; Activities and Grading are
+                 available from assignment onwards. */
               <div style={{ padding: "40px 24px", textAlign: "center" }}>
                 <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
                 <p style={{ margin: 0, fontSize: 13, color: "#6B778C", lineHeight: 1.6 }}>
@@ -1577,6 +1563,11 @@ function TeacherDetail({
                   {awaitingResubmission && (
                     <div style={{ backgroundColor: "#EAE6FF", border: "1px solid #998DD9", borderRadius: 4, padding: "8px 10px", marginBottom: 12, fontSize: 12, color: "#403294", lineHeight: 1.5 }}>
                       ↩ Resubmission requested — assessment is paused until {student.name} resubmits.
+                      {sub.resubmissionMessage && (
+                        <p style={{ margin: "6px 0 0", fontSize: 12, color: "#172B4D", lineHeight: 1.6, backgroundColor: "#fff", borderRadius: 3, padding: "6px 8px" }}>
+                          Your message: "{sub.resubmissionMessage}"
+                        </p>
+                      )}
                     </div>
                   )}
                   {isExcused && (
@@ -1599,7 +1590,7 @@ function TeacherDetail({
                       setFinalComment(e.target.value);
                       if (finalCommentError && e.target.value.trim()) setFinalCommentError(false);
                     }}
-                    placeholder="Required before approving or rejecting…"
+                    placeholder="Required before approving, rejecting or requesting resubmission…"
                     rows={5}
                     disabled={!canGrade}
                     style={{ width: "100%", border: `2px solid ${finalCommentError ? "#DE350B" : "#DFE1E6"}`, borderRadius: 3, padding: "8px 10px", fontSize: 13, resize: "vertical", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#172B4D", lineHeight: 1.5, backgroundColor: !canGrade ? "#F4F5F7" : "#fff", marginBottom: finalCommentError ? 4 : 12 }}
@@ -1614,6 +1605,7 @@ function TeacherDetail({
                   <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                     <Btn variant="primary" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); setModal("approve"); }}>✓ Approve</Btn>
                     <Btn variant="danger" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); setModal("reject"); }}>✗ Reject</Btn>
+                    <Btn variant="warning" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); onAssessAction(submissionId, "resubmit", finalComment.trim()); setFinalComment(""); }}>↩ Request resubmission</Btn>
                   </div>
                 </div>
               ) : (
@@ -1680,72 +1672,6 @@ function TeacherDetail({
                         </div>
                       );
                     })}
-                  </div>
-                )}
-              </div>
-            ) : sidebarView === "resubmission" ? (
-              /* Message-first resubmission request */
-              <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-                {awaitingResubmission ? (
-                  <div>
-                    <div style={{ backgroundColor: "#EAE6FF", border: "1px solid #998DD9", borderRadius: 4, padding: "8px 10px", marginBottom: 12, fontSize: 12, color: "#403294", lineHeight: 1.5 }}>
-                      ↩ Resubmission requested — assessment is paused until {student.name} resubmits.
-                    </div>
-                    {sub.resubmissionMessage && (
-                      <>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                          Your message
-                        </div>
-                        <p style={{ margin: 0, fontSize: 12, color: "#172B4D", lineHeight: 1.6, backgroundColor: "#F4F5F7", borderRadius: 3, padding: "8px 10px" }}>
-                          "{sub.resubmissionMessage}"
-                        </p>
-                      </>
-                    )}
-                  </div>
-                ) : !canAssess ? (
-                  <p style={{ margin: 0, fontSize: 12, color: "#6B778C", fontStyle: "italic", lineHeight: 1.5 }}>
-                    The submission has already been graded — undo the grading first to request a resubmission.
-                  </p>
-                ) : (
-                  <div>
-                    <p style={{ margin: "0 0 12px", fontSize: 12, color: "#6B778C", lineHeight: 1.5 }}>
-                      Ask {student.name} to revise and resubmit their work. The message below is shown to the student together with the request.
-                    </p>
-                    <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                      Message to the student <span style={{ color: "#DE350B" }}>*</span>
-                    </label>
-                    <textarea
-                      value={resubMessage}
-                      onChange={(e) => {
-                        setResubMessage(e.target.value);
-                        if (resubError && e.target.value.trim()) setResubError(false);
-                      }}
-                      placeholder={`What should ${student.name} revise?`}
-                      rows={5}
-                      style={{ width: "100%", border: `2px solid ${resubError ? "#DE350B" : "#DFE1E6"}`, borderRadius: 3, padding: "8px 10px", fontSize: 13, resize: "vertical", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#172B4D", lineHeight: 1.5, backgroundColor: "#fff", marginBottom: resubError ? 4 : 12 }}
-                      onFocus={(e) => (e.target.style.borderColor = "#4C9AFF")}
-                      onBlur={(e) => (e.target.style.borderColor = resubError ? "#DE350B" : "#DFE1E6")}
-                    />
-                    {resubError && (
-                      <p style={{ margin: "0 0 12px", fontSize: 12, color: "#DE350B", lineHeight: 1.4 }}>
-                        ⚠ Add a message
-                      </p>
-                    )}
-                    <Btn
-                      variant="warning"
-                      fullWidth
-                      onClick={() => {
-                        if (!resubMessage.trim()) {
-                          setResubError(true);
-                          return;
-                        }
-                        setResubError(false);
-                        onAssessAction(submissionId, "resubmit", resubMessage.trim());
-                        setResubMessage("");
-                      }}
-                    >
-                      ↩ Request resubmission
-                    </Btn>
                   </div>
                 )}
               </div>
@@ -1996,6 +1922,14 @@ function TeacherDetail({
 
                   {/* Add comment — pinned to the bottom, always visible */}
                   <div style={{ flexShrink: 0, borderTop: "1px solid #DFE1E6", padding: "12px 16px", backgroundColor: "#fff" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#42526E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                      <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#42526E" }}>
+                        Add comments
+                      </span>
+                    </div>
                     <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
                       <textarea
                         ref={composerRef}
