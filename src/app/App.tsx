@@ -818,7 +818,7 @@ function TeacherDetail({
   const [finalComment, setFinalComment] = useState(sub.finalComment ?? "");
   const [finalCommentError, setFinalCommentError] = useState(false);
   const [modal, setModal] = useState<
-    "approve" | "reject" | "undo" | "excuse" | null
+    "approve" | "reject" | "resubmit" | "undo" | "excuse" | null
   >(null);
   // What the right sidebar shows, driven by the action bar above the canvas.
   // Activities is the default; annotating is only allowed on Annotations.
@@ -1590,7 +1590,7 @@ function TeacherDetail({
                       setFinalComment(e.target.value);
                       if (finalCommentError && e.target.value.trim()) setFinalCommentError(false);
                     }}
-                    placeholder="Required before approving, rejecting or requesting resubmission…"
+                    placeholder="Required before approving or rejecting…"
                     rows={5}
                     disabled={!canGrade}
                     style={{ width: "100%", border: `2px solid ${finalCommentError ? "#DE350B" : "#DFE1E6"}`, borderRadius: 3, padding: "8px 10px", fontSize: 13, resize: "vertical", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#172B4D", lineHeight: 1.5, backgroundColor: !canGrade ? "#F4F5F7" : "#fff", marginBottom: finalCommentError ? 4 : 12 }}
@@ -1605,7 +1605,9 @@ function TeacherDetail({
                   <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                     <Btn variant="primary" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); setModal("approve"); }}>✓ Approve</Btn>
                     <Btn variant="danger" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); setModal("reject"); }}>✗ Reject</Btn>
-                    <Btn variant="warning" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); onAssessAction(submissionId, "resubmit", finalComment.trim()); setFinalComment(""); }}>↩ Request resubmission</Btn>
+                    {/* Unlike approve/reject, no final comment is required —
+                        the confirm pop-up tells the teacher what happens. */}
+                    <Btn variant="warning" fullWidth disabled={!canGrade} onClick={() => { setFinalCommentError(false); setModal("resubmit"); }}>↩ Request resubmission</Btn>
                   </div>
                 </div>
               ) : (
@@ -2182,6 +2184,24 @@ function TeacherDetail({
           onCancel={() => setModal(null)}
           onConfirm={() => {
             onAssessAction(submissionId, "reject", finalComment);
+            setModal(null);
+          }}
+        />
+      )}
+      {modal === "resubmit" && (
+        <ConfirmModal
+          title="Request resubmission"
+          body={`Ask ${student.name} to revise and resubmit their work? Assessment is paused until they resubmit.${
+            finalComment.trim()
+              ? " Your final comment is sent to the student along with the request."
+              : " You haven't written a final comment — the request is sent without a message."
+          }`}
+          confirmLabel="Request resubmission"
+          confirmVariant="warning"
+          onCancel={() => setModal(null)}
+          onConfirm={() => {
+            onAssessAction(submissionId, "resubmit", finalComment.trim() || undefined);
+            setFinalComment("");
             setModal(null);
           }}
         />
