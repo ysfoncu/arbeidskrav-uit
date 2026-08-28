@@ -40,7 +40,6 @@ interface Submission {
   body: string;
   deliveryStatus: DeliveryStatus;
   assessmentStatus: AssessmentStatus;
-  deadline: string;
   submittedAt: string | null;
   finalComment: string | null;
   // Teacher's instruction attached to a resubmission request; shown to the
@@ -920,8 +919,6 @@ const SUBS_INIT: Submission[] = [
     body: "",
     deliveryStatus: "missing",
     assessmentStatus: "not_assessed",
-    // Demo data: always a week out so a fresh submission is never "late".
-    deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     submittedAt: null,
     finalComment: null,
     resubmissionMessage: null,
@@ -4069,14 +4066,15 @@ export default function App() {
       setSelectedSubId(submissions[newIdx].id);
   };
 
+  // There are no deadlines in the prototype: submitting always lands on
+  // "submitted". "Late" is a status the teacher sets in the grading panel.
   const handleStudentSubmit = (id: string, body: string) => {
     const sub = submissions.find((s) => s.id === id)!;
-    const isLate = new Date() > new Date(sub.deadline);
     setSubmissions((subs) =>
       subs.map((s) =>
         s.id !== id
           ? s
-          : { ...s, body, deliveryStatus: isLate ? "late" : "submitted", submittedAt: new Date().toISOString() }
+          : { ...s, body, deliveryStatus: "submitted", submittedAt: new Date().toISOString() }
       )
     );
     addToast("success", L.toastSubmitted);

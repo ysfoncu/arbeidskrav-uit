@@ -34,7 +34,7 @@ Structure within `App.tsx`, top to bottom:
 **State model:** everything is `useState` in `App`, threaded down via props — the one exception is the editable UI text, which `App` publishes through `LabelsCtx` so any component can call `useLabels()`. There is no router (`react-router` is a dependency but unused) and no external store. Navigation is state flags: `role` (`teacher`/`student`/`supervisor`), `viewMode` (`overview`/`detail`), `selectedSubId`, etc.
 
 **Two independent status axes** (do not conflate them):
-- `deliveryStatus`: `missing` | `late` | `submitted` — derived from deadline + student action.
+- `deliveryStatus`: `missing` | `late` | `submitted` | `excused` | `extended` — `missing` until the student submits, then `submitted`. There are no deadlines: `late`, `excused` and `extended` are set by the teacher in the grading panel.
 - `assessmentStatus`: `not_assessed` | `resubmission_requested` | `approved` | `not_approved` — teacher-set. Only the teacher role can change it. A final comment is required before approve/reject.
 
 **Role gating** is UI-only (the role switcher). In production this must be enforced server-side — the prototype does not.
