@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, ReactNode } from "react";
+import { useState, useEffect, useRef, createContext, useContext, ReactNode } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Role = "teacher" | "student" | "supervisor";
@@ -98,11 +98,820 @@ const USERS: User[] = [
   { id: "supervisor1", name: "Ingrid Haug", role: "supervisor", initials: "IH", color: "#97A0AF" },
 ];
 
-const TASK = {
-  title: "Reflection Report — Practicum Week 3",
-  instructions:
+// ─── Template (editable UI text) ──────────────────────────────────────────────
+// Every visible string in the prototype lives here so the Template view can
+// rewrite it live: button labels, chip labels, headings, placeholders, notices
+// and toasts. Values may contain {tokens} filled in at render time (see fill())
+// and *asterisks* for bold (see RichText).
+const DEFAULT_LABELS = {
+  // Task
+  taskTitle: "Reflection Report — Practicum Week 3",
+  instructionsHeading: "Instructions",
+  taskInstructions:
     "Write a reflection on your practicum experiences this week. Address your professional development, challenges encountered, and learning outcomes. Minimum 400 words.",
+  btnHideInstructions: "Hide",
+  btnShowInstructions: "Show",
+
+  // Top navigation
+  appName: "MOSO InPraxis",
+  appSection: "/ Supervision",
+  navTemplate: "Template",
+  navTeacher: "Teacher",
+  navStudent: "Student",
+
+  // Page header
+  headerAssessing: "Assessing:",
+  headerViewing: "Viewing:",
+  btnDownloadPdf: "↓ Download PDF",
+
+  // Status chips
+  chipSubmitted: "Submitted",
+  chipResubmitted: "Resubmitted",
+  chipLate: "Late",
+  chipMissing: "Not submitted",
+  chipExcused: "Excused",
+  chipExtended: "Extended",
+  chipDraft: "Draft · only you",
+  chipNotAssessed: "Not assessed",
+  chipNotGraded: "Not graded",
+  chipResubmissionReqShort: "Resubmission req.",
+  chipApproved: "Approved",
+  chipNotApproved: "Not approved",
+  chipGraded: "Graded",
+  chipResubmissionRequested: "Resubmission requested",
+
+  // Versions
+  versionPrefix: "Version",
+  versionSubmitted: "Submitted",
+  versionResubmitted: "Resubmitted",
+  versionRejected: "Rejected",
+  versionResubmissionRequested: "Resubmission requested",
+  versionViewingSuffix: "· viewing",
+  btnShowPrevVersions: "Display previous versions ({count})",
+  btnHidePrevVersions: "Hide previous versions",
+  btnBackToCurrent: "Back to current version",
+  btnBackToDraft: "Back to draft",
+
+  // Tabs (teacher)
+  tabActivities: "🕘 Activities",
+  tabAnnotations: "✎ Annotations",
+  tabGrading: "✓ Grading",
+  panelActivities: "Activities",
+  panelAnnotations: "Annotations & comments",
+  panelGrading: "Grading",
+
+  // Teacher grading panel
+  headingSubmissionStatus: "Submission status",
+  headingAssessSubmission: "Assess submission",
+  labelFinalComment: "Final comment",
+  placeholderFinalComment: "Required before approving or rejecting…",
+  errorFinalComment: "⚠ Add a final comment",
+  btnApprove: "✓ Approve",
+  btnReject: "✗ Reject",
+  btnRequestResubmission: "↩ Request resubmission",
+  btnUndoGrading: "↺ Undo grading",
+  noticeAssessmentPaused:
+    "↩ Resubmission requested — assessment is paused until {student} resubmits.",
+  noticeYourMessage: "Your message:",
+  noticeExcusedTeacher:
+    "Excused — the submission request is cancelled. {student} doesn't have to submit and no grading is required.",
+  noticeNothingToGrade:
+    "📝 No submission to grade yet — approve and reject unlock once {student} submits.",
+
+  // Empty states
+  emptyNoSubmissionTitle: "No submission yet",
+  emptyNoSubmissionBody: "{student} has not submitted their work.",
+  emptyActivities: "No activity yet.",
+  emptyFeed: "No annotations or comments yet.",
+  emptyAnnotationsLocked: "Available after {student} has submitted their work.",
+  emptySubmissionText: "No submission text yet.",
+
+  // Annotations
+  annTypesTitle: "Annotation types",
+  annTypeHighlight: "Highlight",
+  annTypeStrikeout: "Strikeout",
+  annTypeReplaceText: "Replace text",
+  annPopoverTitle: "Add {type} annotation",
+  annNotePlaceholder: "Add a note (optional)…",
+  annReplacementPlaceholder: "Enter replacement text…",
+  labelOriginal: "Original",
+  labelReplacedWith: "Replaced with",
+  labelSelectedText: "Selected text",
+  labelNote: "Note",
+  hintAnnotate: "To add an annotation, select the text you want to annotate.",
+  btnDontShowAgain: "Don't show again",
+
+  // Comments
+  headingAddComments: "Add comments",
+  placeholderComment: "Write a comment…",
+  chipComment: "Comment",
+  chipAudio: "Audio",
+  audioCommentLabel: "Audio comment — 0:30",
+
+  // Generic buttons
+  btnSave: "Save",
+  btnCancel: "Cancel",
+  btnEdit: "Edit",
+  btnDelete: "Delete",
+
+  // Student
+  headingYourSubmission: "Your submission",
+  headingYourRevision: "Your revised submission — version-{n}",
+  placeholderEditor: "Write your reflection here…",
+  btnSubmit: "Submit",
+  btnResubmit: "↩ Resubmit version-{n}",
+  btnDiscardDraft: "Discard draft",
+  btnReviseResubmit: "↩ Revise & resubmit",
+  minWords: "400",
+  wordCount: "{count} words",
+  wordCountRemaining: "· {remaining} more to reach minimum",
+  noticeExcusedStudent:
+    "You have been excused from this assignment — you don't need to submit.",
+  noticeAwaitingReview: "Your submission is awaiting review by your teacher.",
+  noticeResubmissionRequested:
+    "Your teacher has requested a resubmission. Please revise your work and resubmit.",
+  noticeDraftPrivate:
+    "*Version-{n} is a draft only you can see.* It starts as a clean copy of version-{prev} — the teacher's marks are not carried over. Open *version-{prev}* above to read them side by side. Your teacher sees nothing until you resubmit.",
+
+  // Feedback sidebar (student / supervisor)
+  feedbackTitle: "Feedback",
+  feedbackEmpty: "Feedback from your teacher will appear here after review.",
+
+  // Compare view
+  compareBannerTeacher:
+    "Comparing *Version-{n}* (read-only) with the current *Version-{current}* — select text on the current version to annotate it.",
+  compareBannerStudentDraft:
+    "Comparing *version-{n}* and its annotations (read-only) with *version-{current}* — your draft, which you can keep editing here.",
+  compareBannerStudent:
+    "Comparing *version-{n}* and its annotations (read-only) with *version-{current}*.",
+  labelVersionPrevious: "Version-{n} — previous",
+  labelVersionCurrent: "Version-{n} — current",
+  labelVersionAnnotated: "Version-{n} — annotated by your teacher",
+  labelVersionDraft: "Version-{n} — your draft",
+
+  // Confirm dialogs
+  modalApproveTitle: "Approve submission",
+  modalApproveBody: "Approve {student}'s submission with the final comment provided?",
+  modalApproveConfirm: "Approve",
+  modalRejectTitle: "Reject submission",
+  modalRejectBody: "Mark {student}'s submission as Not Approved?",
+  modalRejectConfirm: "Reject",
+  modalResubmitTitle: "Request resubmission",
+  modalResubmitBody:
+    "Ask {student} to revise and resubmit their work? Assessment is paused until they resubmit.",
+  modalResubmitWithComment:
+    " Your final comment is sent to the student along with the request.",
+  modalResubmitNoComment:
+    " You haven't written a final comment — the request is sent without a message.",
+  modalResubmitConfirm: "Request resubmission",
+  modalExcuseTitle: "Excuse student",
+  modalExcuseBody:
+    "Are you sure you want to excuse {student} from this assignment? This cancels the submission request — {student} will not submit, and no grading is required.",
+  modalExcuseConfirm: "Excuse student",
+  modalUndoTitle: "Undo grading",
+  modalUndoBody:
+    "Undo the grading of {student}'s submission? The result is reverted and the submission can be assessed again.",
+  modalUndoConfirm: "Undo grading",
+  confirmDeleteAnnotation: "Delete this annotation? Any attached note will be removed too.",
+  confirmDeleteComment: "Delete this comment?",
+
+  // Activity timeline
+  activityAssigned: "assigned to {student}",
+  activitySubmitted: "Submitted",
+  activityResubmitted: "Resubmitted",
+  activityResubmissionRequested: "Requested resubmission",
+  activityApproved: "Approved",
+  activityRejected: "Not approved",
+  activityUndone: "Undid grading",
+
+  // Toasts
+  toastAnnotationAdded: "Annotation added",
+  toastAnnotationUpdated: "Annotation updated",
+  toastAnnotationDeleted: "Annotation deleted",
+  toastCommentAdded: "Comment added",
+  toastAudioCommentAdded: "Audio comment added",
+  toastCommentUpdated: "Comment updated",
+  toastCommentDeleted: "Comment deleted",
+  toastStatusSet: "Status set to {status}",
+  toastApproved: "✓ Submission approved",
+  toastRejected: "Submission marked Not Approved",
+  toastResubmissionRequested: "Resubmission requested",
+  toastGradingUndone: "Grading undone — the submission can be assessed again",
+  toastSubmitted: "Submission sent successfully!",
+  toastResubmitted: "Resubmission sent!",
+  toastDraftCreated: "Draft version created — only you can see it until you resubmit",
+  toastDraftDiscarded: "Draft discarded",
+  toastSelectionOverlap:
+    "Selection overlaps an existing annotation — adjust the selection or delete the annotation first",
+  toastSelectionUnanchored:
+    "This selection can't be annotated — select text within a single paragraph",
 };
+
+type Labels = typeof DEFAULT_LABELS;
+type LabelKey = keyof Labels;
+
+// Grouping used by the Template view; every key above appears in exactly one
+// group so nothing becomes uneditable.
+const LABEL_GROUPS: {
+  title: string;
+  hint?: string;
+  fields: { key: LabelKey; name: string; multiline?: boolean }[];
+}[] = [
+  {
+    title: "Task",
+    hint: "The instructions text is shown to both the teacher and the student on the task card.",
+    fields: [
+      { key: "taskTitle", name: "Task title" },
+      { key: "instructionsHeading", name: "Instructions heading" },
+      { key: "taskInstructions", name: "Instructions (free text)", multiline: true },
+      { key: "btnHideInstructions", name: "Hide instructions button" },
+      { key: "btnShowInstructions", name: "Show instructions button" },
+    ],
+  },
+  {
+    title: "Navigation & header",
+    fields: [
+      { key: "appName", name: "Product name" },
+      { key: "appSection", name: "Module label" },
+      { key: "navTemplate", name: "Template button" },
+      { key: "navTeacher", name: "Teacher button" },
+      { key: "navStudent", name: "Student button" },
+      { key: "headerAssessing", name: "Teacher picker label" },
+      { key: "headerViewing", name: "Student picker label" },
+      { key: "btnDownloadPdf", name: "Download PDF button" },
+    ],
+  },
+  {
+    title: "Status chips",
+    fields: [
+      { key: "chipSubmitted", name: "Submitted" },
+      { key: "chipResubmitted", name: "Resubmitted" },
+      { key: "chipLate", name: "Late" },
+      { key: "chipMissing", name: "Not submitted" },
+      { key: "chipExcused", name: "Excused" },
+      { key: "chipExtended", name: "Extended" },
+      { key: "chipDraft", name: "Draft" },
+      { key: "chipNotAssessed", name: "Not assessed" },
+      { key: "chipNotGraded", name: "Not graded" },
+      { key: "chipResubmissionReqShort", name: "Resubmission requested (short)" },
+      { key: "chipResubmissionRequested", name: "Resubmission requested (grade chip)" },
+      { key: "chipApproved", name: "Approved" },
+      { key: "chipNotApproved", name: "Not approved" },
+      { key: "chipGraded", name: "Graded" },
+      { key: "chipComment", name: "Comment chip" },
+      { key: "chipAudio", name: "Audio chip" },
+    ],
+  },
+  {
+    title: "Versions",
+    fields: [
+      { key: "versionPrefix", name: "Version word" },
+      { key: "versionSubmitted", name: "First version suffix" },
+      { key: "versionResubmitted", name: "Later version suffix" },
+      { key: "versionRejected", name: "Outcome: rejected" },
+      { key: "versionResubmissionRequested", name: "Outcome: resubmission requested" },
+      { key: "versionViewingSuffix", name: "Viewing suffix" },
+      { key: "btnShowPrevVersions", name: "Show previous versions — {count}" },
+      { key: "btnHidePrevVersions", name: "Hide previous versions" },
+      { key: "btnBackToCurrent", name: "Back to current version" },
+      { key: "btnBackToDraft", name: "Back to draft" },
+      { key: "labelVersionPrevious", name: "Compare: previous pane — {n}" },
+      { key: "labelVersionCurrent", name: "Compare: current pane — {n}" },
+      { key: "labelVersionAnnotated", name: "Compare: annotated pane — {n}" },
+      { key: "labelVersionDraft", name: "Compare: draft pane — {n}" },
+      { key: "compareBannerTeacher", name: "Compare banner (teacher)", multiline: true },
+      { key: "compareBannerStudentDraft", name: "Compare banner (student, draft)", multiline: true },
+      { key: "compareBannerStudent", name: "Compare banner (student)", multiline: true },
+    ],
+  },
+  {
+    title: "Teacher — tabs & panels",
+    fields: [
+      { key: "tabActivities", name: "Activities tab" },
+      { key: "tabAnnotations", name: "Annotations tab" },
+      { key: "tabGrading", name: "Grading tab" },
+      { key: "panelActivities", name: "Activities panel title" },
+      { key: "panelAnnotations", name: "Annotations panel title" },
+      { key: "panelGrading", name: "Grading panel title" },
+    ],
+  },
+  {
+    title: "Teacher — grading",
+    fields: [
+      { key: "headingSubmissionStatus", name: "Submission status heading" },
+      { key: "headingAssessSubmission", name: "Assess submission heading" },
+      { key: "labelFinalComment", name: "Final comment label" },
+      { key: "placeholderFinalComment", name: "Final comment placeholder" },
+      { key: "errorFinalComment", name: "Final comment error" },
+      { key: "btnApprove", name: "Approve button" },
+      { key: "btnReject", name: "Reject button" },
+      { key: "btnRequestResubmission", name: "Request resubmission button" },
+      { key: "btnUndoGrading", name: "Undo grading button" },
+      { key: "noticeAssessmentPaused", name: "Assessment paused notice", multiline: true },
+      { key: "noticeYourMessage", name: "Your message label" },
+      { key: "noticeExcusedTeacher", name: "Excused notice (teacher)", multiline: true },
+      { key: "noticeNothingToGrade", name: "Nothing to grade notice", multiline: true },
+    ],
+  },
+  {
+    title: "Annotations & comments",
+    fields: [
+      { key: "annTypesTitle", name: "Type picker title" },
+      { key: "annTypeHighlight", name: "Highlight type" },
+      { key: "annTypeStrikeout", name: "Strikeout type" },
+      { key: "annTypeReplaceText", name: "Replace text type" },
+      { key: "annPopoverTitle", name: "Note popover title — {type}" },
+      { key: "annNotePlaceholder", name: "Note placeholder" },
+      { key: "annReplacementPlaceholder", name: "Replacement placeholder" },
+      { key: "labelOriginal", name: "Original label" },
+      { key: "labelReplacedWith", name: "Replaced with label" },
+      { key: "labelSelectedText", name: "Selected text label" },
+      { key: "labelNote", name: "Note label" },
+      { key: "hintAnnotate", name: "Annotation hint", multiline: true },
+      { key: "btnDontShowAgain", name: "Dismiss hint button" },
+      { key: "headingAddComments", name: "Add comments heading" },
+      { key: "placeholderComment", name: "Comment placeholder" },
+      { key: "audioCommentLabel", name: "Audio comment label" },
+      { key: "btnSave", name: "Save button" },
+      { key: "btnCancel", name: "Cancel button" },
+      { key: "btnEdit", name: "Edit button" },
+      { key: "btnDelete", name: "Delete button" },
+    ],
+  },
+  {
+    title: "Student",
+    fields: [
+      { key: "headingYourSubmission", name: "Submission heading" },
+      { key: "headingYourRevision", name: "Revision heading — {n}" },
+      { key: "placeholderEditor", name: "Editor placeholder" },
+      { key: "btnSubmit", name: "Submit button" },
+      { key: "btnResubmit", name: "Resubmit button — {n}" },
+      { key: "btnDiscardDraft", name: "Discard draft button" },
+      { key: "btnReviseResubmit", name: "Revise & resubmit button" },
+      { key: "minWords", name: "Minimum word count (0 = off)" },
+      { key: "wordCount", name: "Word count — {count}" },
+      { key: "wordCountRemaining", name: "Words remaining — {remaining}" },
+      { key: "noticeExcusedStudent", name: "Excused notice", multiline: true },
+      { key: "noticeAwaitingReview", name: "Awaiting review notice", multiline: true },
+      { key: "noticeResubmissionRequested", name: "Resubmission notice", multiline: true },
+      { key: "noticeDraftPrivate", name: "Private draft notice", multiline: true },
+      { key: "feedbackTitle", name: "Feedback panel title" },
+      { key: "feedbackEmpty", name: "Feedback empty state", multiline: true },
+    ],
+  },
+  {
+    title: "Empty states",
+    fields: [
+      { key: "emptyNoSubmissionTitle", name: "No submission title" },
+      { key: "emptyNoSubmissionBody", name: "No submission body — {student}" },
+      { key: "emptyActivities", name: "No activity" },
+      { key: "emptyFeed", name: "No annotations or comments" },
+      { key: "emptyAnnotationsLocked", name: "Annotations locked — {student}" },
+      { key: "emptySubmissionText", name: "No submission text" },
+    ],
+  },
+  {
+    title: "Confirm dialogs",
+    fields: [
+      { key: "modalApproveTitle", name: "Approve — title" },
+      { key: "modalApproveBody", name: "Approve — body", multiline: true },
+      { key: "modalApproveConfirm", name: "Approve — confirm" },
+      { key: "modalRejectTitle", name: "Reject — title" },
+      { key: "modalRejectBody", name: "Reject — body", multiline: true },
+      { key: "modalRejectConfirm", name: "Reject — confirm" },
+      { key: "modalResubmitTitle", name: "Resubmission — title" },
+      { key: "modalResubmitBody", name: "Resubmission — body", multiline: true },
+      { key: "modalResubmitWithComment", name: "Resubmission — with comment", multiline: true },
+      { key: "modalResubmitNoComment", name: "Resubmission — without comment", multiline: true },
+      { key: "modalResubmitConfirm", name: "Resubmission — confirm" },
+      { key: "modalExcuseTitle", name: "Excuse — title" },
+      { key: "modalExcuseBody", name: "Excuse — body", multiline: true },
+      { key: "modalExcuseConfirm", name: "Excuse — confirm" },
+      { key: "modalUndoTitle", name: "Undo grading — title" },
+      { key: "modalUndoBody", name: "Undo grading — body", multiline: true },
+      { key: "modalUndoConfirm", name: "Undo grading — confirm" },
+      { key: "confirmDeleteAnnotation", name: "Delete annotation prompt", multiline: true },
+      { key: "confirmDeleteComment", name: "Delete comment prompt" },
+    ],
+  },
+  {
+    title: "Activity timeline",
+    fields: [
+      { key: "activityAssigned", name: "Assigned — {student}" },
+      { key: "activitySubmitted", name: "Submitted" },
+      { key: "activityResubmitted", name: "Resubmitted" },
+      { key: "activityResubmissionRequested", name: "Requested resubmission" },
+      { key: "activityApproved", name: "Approved" },
+      { key: "activityRejected", name: "Not approved" },
+      { key: "activityUndone", name: "Undid grading" },
+    ],
+  },
+  {
+    title: "Toasts",
+    fields: [
+      { key: "toastAnnotationAdded", name: "Annotation added" },
+      { key: "toastAnnotationUpdated", name: "Annotation updated" },
+      { key: "toastAnnotationDeleted", name: "Annotation deleted" },
+      { key: "toastCommentAdded", name: "Comment added" },
+      { key: "toastAudioCommentAdded", name: "Audio comment added" },
+      { key: "toastCommentUpdated", name: "Comment updated" },
+      { key: "toastCommentDeleted", name: "Comment deleted" },
+      { key: "toastStatusSet", name: "Status set — {status}" },
+      { key: "toastApproved", name: "Approved" },
+      { key: "toastRejected", name: "Rejected" },
+      { key: "toastResubmissionRequested", name: "Resubmission requested" },
+      { key: "toastGradingUndone", name: "Grading undone", multiline: true },
+      { key: "toastSubmitted", name: "Submission sent" },
+      { key: "toastResubmitted", name: "Resubmission sent" },
+      { key: "toastDraftCreated", name: "Draft created", multiline: true },
+      { key: "toastDraftDiscarded", name: "Draft discarded" },
+      { key: "toastSelectionOverlap", name: "Selection overlaps", multiline: true },
+      { key: "toastSelectionUnanchored", name: "Selection unanchored", multiline: true },
+    ],
+  },
+];
+
+const LabelsCtx = createContext<Labels>(DEFAULT_LABELS);
+const useLabels = () => useContext(LabelsCtx);
+
+// "Ask {student} to resubmit" + { student: "Ola" } → "Ask Ola to resubmit".
+// Unknown tokens are left as-is so a typo in the Template view is visible.
+function fill(tpl: string, vars: Record<string, string | number> = {}): string {
+  return tpl.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+}
+
+// Renders *asterisk-wrapped* runs as bold so template text can keep emphasis.
+function RichText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\*[^*]+\*)/g).map((part, i) =>
+        part.startsWith("*") && part.endsWith("*") && part.length > 2 ? (
+          <strong key={i}>{part.slice(1, -1)}</strong>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+}
+
+// The template's free-text instructions, rendered on the task card in both the
+// teacher's and the student's view. Nothing is shown while the field is empty.
+// Collapsible: teacher and student each get their own show/hide state, so one
+// hiding the text does not affect the other.
+function TaskInstructions() {
+  const L = useLabels();
+  const [open, setOpen] = useState(true);
+  if (!L.taskInstructions.trim()) return null;
+  return (
+    <div
+      style={{
+        backgroundColor: "#F4F5F7",
+        border: "1px solid #DFE1E6",
+        borderRadius: 3,
+        padding: "8px 10px",
+        margin: "0 0 10px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 10,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            color: "#6B778C",
+          }}
+        >
+          {L.instructionsHeading}
+        </div>
+        <button
+          className="no-print"
+          onClick={() => setOpen((o) => !o)}
+          title={open ? L.btnHideInstructions : L.btnShowInstructions}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#0052CC",
+            padding: "2px 4px",
+            flexShrink: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ fontSize: 8 }}>{open ? "▲" : "▼"}</span>
+          {open ? L.btnHideInstructions : L.btnShowInstructions}
+        </button>
+      </div>
+      {open && (
+        <p
+          style={{
+            margin: "3px 0 0",
+            fontSize: 13,
+            color: "#42526E",
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          <RichText text={L.taskInstructions} />
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Template View ───────────────────────────────────────────────────────────
+// Edits every label live: typing here immediately rewrites the teacher's and
+// the student's screens. Session-only, like the rest of the prototype.
+function TemplateView({
+  labels,
+  onChange,
+  onReset,
+}: {
+  labels: Labels;
+  onChange: (key: LabelKey, value: string) => void;
+  onReset: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [openGroups, setOpenGroups] = useState<string[]>([LABEL_GROUPS[0].title]);
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+
+  const changedCount = (Object.keys(DEFAULT_LABELS) as LabelKey[]).filter(
+    (k) => labels[k] !== DEFAULT_LABELS[k]
+  ).length;
+
+  const matches = (f: { key: LabelKey; name: string }) =>
+    !searching ||
+    f.name.toLowerCase().includes(q) ||
+    f.key.toLowerCase().includes(q) ||
+    labels[f.key].toLowerCase().includes(q);
+
+  const inputStyle = {
+    width: "100%",
+    border: "2px solid #DFE1E6",
+    borderRadius: 3,
+    padding: "6px 8px",
+    fontSize: 13,
+    fontFamily: "inherit",
+    color: "#172B4D",
+    outline: "none",
+    boxSizing: "border-box" as const,
+    lineHeight: 1.5,
+    backgroundColor: "#fff",
+  };
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+      <div style={{ maxWidth: 940, margin: "0 auto" }}>
+        {/* Intro card */}
+        <div
+          style={{
+            backgroundColor: "#fff",
+            border: "1px solid #DFE1E6",
+            borderLeft: "4px solid #6554C0",
+            borderRadius: 4,
+            padding: "16px 20px",
+            marginBottom: 20,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: "#172B4D", marginBottom: 6 }}>
+                Template — form text
+              </h2>
+              <p style={{ margin: 0, fontSize: 13, color: "#42526E", lineHeight: 1.6 }}>
+                Every static text in the form is editable here — button labels, chip labels,
+                headings, placeholders, notices and toasts. Changes apply immediately to the
+                Teacher and Student views. Wrap text in *asterisks* for bold; {"{tokens}"} such as{" "}
+                {"{student}"} or {"{n}"} are filled in automatically.
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: 12, color: "#6B778C" }}>
+                {changedCount === 0 ? "No changes" : `${changedCount} changed`}
+              </span>
+              <Btn variant="default" small onClick={onReset} disabled={changedCount === 0}>
+                ↺ Reset all
+              </Btn>
+            </div>
+          </div>
+        </div>
+
+        {/* Instructions — called out because it is the text students read */}
+        <div
+          style={{
+            backgroundColor: "#fff",
+            border: "1px solid #DFE1E6",
+            borderLeft: "4px solid #0052CC",
+            borderRadius: 4,
+            padding: "16px 20px",
+            marginBottom: 20,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#172B4D", marginBottom: 4 }}>
+            Instructions
+          </div>
+          <p style={{ margin: "0 0 10px", fontSize: 12, color: "#6B778C", lineHeight: 1.5 }}>
+            Free text shown on the task card in both the teacher's and the student's view. Leave
+            empty to hide it.
+          </p>
+          <input
+            value={labels.taskTitle}
+            onChange={(e) => onChange("taskTitle", e.target.value)}
+            placeholder="Task title"
+            style={{ ...inputStyle, fontWeight: 600, marginBottom: 8 }}
+            onFocus={(e) => (e.target.style.borderColor = "#4C9AFF")}
+            onBlur={(e) => (e.target.style.borderColor = "#DFE1E6")}
+          />
+          <textarea
+            value={labels.taskInstructions}
+            onChange={(e) => onChange("taskInstructions", e.target.value)}
+            placeholder="Write the instructions students and teachers should see…"
+            rows={5}
+            style={{ ...inputStyle, resize: "vertical" }}
+            onFocus={(e) => (e.target.style.borderColor = "#4C9AFF")}
+            onBlur={(e) => (e.target.style.borderColor = "#DFE1E6")}
+          />
+        </div>
+
+        {/* Search */}
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search labels…"
+          style={{ ...inputStyle, marginBottom: 16, padding: "8px 12px" }}
+          onFocus={(e) => (e.target.style.borderColor = "#4C9AFF")}
+          onBlur={(e) => (e.target.style.borderColor = "#DFE1E6")}
+        />
+
+        {/* Groups */}
+        {LABEL_GROUPS.map((g) => {
+          const fields = g.fields.filter(matches);
+          if (fields.length === 0) return null;
+          const open = searching || openGroups.includes(g.title);
+          const groupChanged = g.fields.filter((f) => labels[f.key] !== DEFAULT_LABELS[f.key]).length;
+          return (
+            <div
+              key={g.title}
+              style={{
+                backgroundColor: "#fff",
+                border: "1px solid #DFE1E6",
+                borderRadius: 4,
+                marginBottom: 12,
+                overflow: "hidden",
+              }}
+            >
+              <button
+                onClick={() =>
+                  setOpenGroups((gs) =>
+                    gs.includes(g.title) ? gs.filter((x) => x !== g.title) : [...gs, g.title]
+                  )
+                }
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "11px 16px",
+                  border: "none",
+                  background: open ? "#F4F5F7" : "#fff",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ fontSize: 10, color: "#42526E", width: 10 }}>{open ? "▼" : "▶"}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#172B4D", flex: 1 }}>
+                  {g.title}
+                </span>
+                {groupChanged > 0 && (
+                  <span
+                    style={{
+                      backgroundColor: "#DEEBFF",
+                      color: "#0052CC",
+                      borderRadius: 10,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "1px 7px",
+                    }}
+                  >
+                    {groupChanged} edited
+                  </span>
+                )}
+                <span style={{ fontSize: 11, color: "#97A0AF" }}>{g.fields.length}</span>
+              </button>
+              {open && (
+                <div style={{ padding: "14px 16px 16px", borderTop: "1px solid #DFE1E6" }}>
+                  {!!g.hint && (
+                    <p style={{ margin: "0 0 12px", fontSize: 12, color: "#6B778C", lineHeight: 1.5 }}>
+                      {g.hint}
+                    </p>
+                  )}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                      gap: 12,
+                    }}
+                  >
+                    {fields.map((f) => {
+                      const changed = labels[f.key] !== DEFAULT_LABELS[f.key];
+                      return (
+                        <div key={f.key} style={{ gridColumn: f.multiline ? "1 / -1" : undefined }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              marginBottom: 4,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: "#42526E",
+                                textTransform: "uppercase",
+                                letterSpacing: "0.06em",
+                              }}
+                            >
+                              {f.name}
+                            </span>
+                            {changed && (
+                              <button
+                                onClick={() => onChange(f.key, DEFAULT_LABELS[f.key])}
+                                title="Reset to default"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: "#0052CC",
+                                  padding: "0 2px",
+                                }}
+                              >
+                                ↺
+                              </button>
+                            )}
+                          </div>
+                          {f.multiline ? (
+                            <textarea
+                              value={labels[f.key]}
+                              onChange={(e) => onChange(f.key, e.target.value)}
+                              rows={3}
+                              style={{
+                                ...inputStyle,
+                                resize: "vertical",
+                                borderColor: changed ? "#4C9AFF" : "#DFE1E6",
+                              }}
+                              onFocus={(e) => (e.target.style.borderColor = "#4C9AFF")}
+                              onBlur={(e) =>
+                                (e.target.style.borderColor = changed ? "#4C9AFF" : "#DFE1E6")
+                              }
+                            />
+                          ) : (
+                            <input
+                              value={labels[f.key]}
+                              onChange={(e) => onChange(f.key, e.target.value)}
+                              style={{
+                                ...inputStyle,
+                                borderColor: changed ? "#4C9AFF" : "#DFE1E6",
+                              }}
+                              onFocus={(e) => (e.target.style.borderColor = "#4C9AFF")}
+                              onBlur={(e) =>
+                                (e.target.style.borderColor = changed ? "#4C9AFF" : "#DFE1E6")
+                              }
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {searching && LABEL_GROUPS.every((g) => g.fields.filter(matches).length === 0) && (
+          <p style={{ fontSize: 13, color: "#6B778C", textAlign: "center", padding: "24px 0" }}>
+            No labels match "{query}".
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const SUBS_INIT: Submission[] = [
   {
@@ -178,13 +987,14 @@ interface VersionLine {
   isDraft: boolean;
 }
 
-function versionLines(sub: Submission, includeDraft = false): VersionLine[] {
+function versionLines(sub: Submission, L: Labels, includeDraft = false): VersionLine[] {
   if (!sub.submittedAt) return [];
-  const name = (n: number) => (n === 1 ? "Submitted" : "Resubmitted");
+  const name = (n: number) => (n === 1 ? L.versionSubmitted : L.versionResubmitted);
+  const V = L.versionPrefix;
   const draft = includeDraft ? sub.draft : null;
   const lines: VersionLine[] = sub.pastVersions.map((p) => ({
     n: p.n,
-    label: `Version-${p.n} - ${name(p.n)} - ${p.outcome === "rejected" ? "Rejected" : "Resubmission requested"}`,
+    label: `${V}-${p.n} - ${name(p.n)} - ${p.outcome === "rejected" ? L.versionRejected : L.versionResubmissionRequested}`,
     isCurrent: false,
     isDraft: false,
   }));
@@ -194,13 +1004,13 @@ function versionLines(sub: Submission, includeDraft = false): VersionLine[] {
     draft
       ? {
           n: sub.version,
-          label: `Version-${sub.version} - ${name(sub.version)} - Resubmission requested`,
+          label: `${V}-${sub.version} - ${name(sub.version)} - ${L.versionResubmissionRequested}`,
           isCurrent: false,
           isDraft: false,
         }
-      : { n: sub.version, label: `Version-${sub.version}`, isCurrent: true, isDraft: false }
+      : { n: sub.version, label: `${V}-${sub.version}`, isCurrent: true, isDraft: false }
   );
-  if (draft) lines.push({ n: draft.n, label: `Version-${draft.n}`, isCurrent: true, isDraft: true });
+  if (draft) lines.push({ n: draft.n, label: `${V}-${draft.n}`, isCurrent: true, isDraft: true });
   return lines.reverse();
 }
 
@@ -264,23 +1074,41 @@ function Avatar({ userId, size = 32 }: { userId: string; size?: number }) {
   );
 }
 
-const LOZENGE_CFG: Record<string, { bg: string; color: string; label: string }> = {
-  submitted:              { bg: "#DEEBFF", color: "#0747A6", label: "Submitted" },
-  resubmitted:            { bg: "#DEEBFF", color: "#0747A6", label: "Resubmitted" },
-  late:                   { bg: "#FFFAE6", color: "#6B4E00", label: "Late" },
-  missing:                { bg: "#FFEBE6", color: "#BF2600", label: "Not submitted" },
-  excused:                { bg: "#EAE6FF", color: "#403294", label: "Excused" },
-  extended:               { bg: "#E6FCFF", color: "#227D9B", label: "Extended" },
-  draft:                  { bg: "#FFFAE6", color: "#6B4E00", label: "Draft · only you" },
-  not_assessed:           { bg: "#F4F5F7", color: "#42526E", label: "Not assessed" },
-  not_graded:             { bg: "#FFFAE6", color: "#6B4E00", label: "Not graded" },
-  resubmission_requested: { bg: "#EAE6FF", color: "#403294", label: "Resubmission req." },
-  approved:               { bg: "#E3FCEF", color: "#006644", label: "Approved" },
-  not_approved:           { bg: "#FFEBE6", color: "#BF2600", label: "Not approved" },
+const LOZENGE_CFG: Record<string, { bg: string; color: string; labelKey: LabelKey }> = {
+  submitted:              { bg: "#DEEBFF", color: "#0747A6", labelKey: "chipSubmitted" },
+  resubmitted:            { bg: "#DEEBFF", color: "#0747A6", labelKey: "chipResubmitted" },
+  late:                   { bg: "#FFFAE6", color: "#6B4E00", labelKey: "chipLate" },
+  missing:                { bg: "#FFEBE6", color: "#BF2600", labelKey: "chipMissing" },
+  excused:                { bg: "#EAE6FF", color: "#403294", labelKey: "chipExcused" },
+  extended:               { bg: "#E6FCFF", color: "#227D9B", labelKey: "chipExtended" },
+  draft:                  { bg: "#FFFAE6", color: "#6B4E00", labelKey: "chipDraft" },
+  not_assessed:           { bg: "#F4F5F7", color: "#42526E", labelKey: "chipNotAssessed" },
+  not_graded:             { bg: "#FFFAE6", color: "#6B4E00", labelKey: "chipNotGraded" },
+  resubmission_requested: { bg: "#EAE6FF", color: "#403294", labelKey: "chipResubmissionReqShort" },
+  approved:               { bg: "#E3FCEF", color: "#006644", labelKey: "chipApproved" },
+  not_approved:           { bg: "#FFEBE6", color: "#BF2600", labelKey: "chipNotApproved" },
 };
 
+// Chip label for an annotation type, taken from the template.
+function annTypeLabel(L: Labels, type: AnnotationType): string {
+  return type === "highlight"
+    ? L.annTypeHighlight
+    : type === "strikeout"
+    ? L.annTypeStrikeout
+    : type === "text"
+    ? L.annTypeReplaceText
+    : type;
+}
+
+// Chip label for a status, taken from the template (falls back to the raw key).
+function lozengeLabel(L: Labels, status: string): string {
+  const cfg = LOZENGE_CFG[status];
+  return cfg ? L[cfg.labelKey] : status;
+}
+
 function Lozenge({ status }: { status: string }) {
-  const cfg = LOZENGE_CFG[status] ?? { bg: "#F4F5F7", color: "#42526E", label: status };
+  const L = useLabels();
+  const cfg = { bg: "#F4F5F7", color: "#42526E", ...(LOZENGE_CFG[status] ?? {}), label: lozengeLabel(L, status) };
   return (
     <span
       style={{
@@ -372,6 +1200,7 @@ function ConfirmModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const L = useLabels();
   return (
     <div
       style={{
@@ -400,7 +1229,7 @@ function ConfirmModal({
         <p style={{ color: "#42526E", marginBottom: 28, lineHeight: 1.6, fontSize: 14 }}>{body}</p>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <Btn variant="default" onClick={onCancel}>
-            Cancel
+            {L.btnCancel}
           </Btn>
           <Btn variant={confirmVariant} onClick={onConfirm}>
             {confirmLabel}
@@ -570,6 +1399,7 @@ function AnnSpan({
   text: string;
   onClick?: (annId: string) => void;
 }) {
+  const L = useLabels();
   const [show, setShow] = useState(false);
   const s = ANN_STYLE[ann.type];
   // For "text" annotations the note is a replacement: show the new text in
@@ -640,7 +1470,7 @@ function AnnSpan({
               fontWeight: 700,
             }}
           >
-            {isTextEdit ? "text · replaced" : ann.type}
+            {annTypeLabel(L, ann.type)}
           </span>
           {isTextEdit ? `Original: "${text}"` : ann.note}
         </span>
@@ -687,11 +1517,12 @@ function AnnotatedText({
   onMouseUp?: (e: React.MouseEvent) => void;
   onAnnClick?: (annId: string) => void;
 }) {
+  const L = useLabels();
   const paras = text.split("\n\n").filter(Boolean);
   if (!paras.length)
     return (
       <p style={{ color: "#6B778C", fontStyle: "italic", fontSize: 14 }}>
-        No submission text yet.
+        {L.emptySubmissionText}
       </p>
     );
   return (
@@ -759,6 +1590,7 @@ function TeacherDetail({
   onMobileSidebarOpen: () => void;
   onMobileSidebarClose: () => void;
 }) {
+  const L = useLabels();
   const sub = submissions.find((s) => s.id === submissionId)!;
   const student = getUser(sub.studentId);
   // Which version is on screen: null = current, otherwise an archived one
@@ -939,9 +1771,9 @@ function TeacherDetail({
         }}
       />
       <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-        <CardBtn label="Cancel" onClick={() => setEditing(null)} />
+        <CardBtn label={L.btnCancel} onClick={() => setEditing(null)} />
         <CardBtn
-          label="Save"
+          label={L.btnSave}
           onClick={() => {
             onSave((editing?.text ?? "").trim());
             setEditing(null);
@@ -965,12 +1797,12 @@ function TeacherDetail({
   // Chip shown in the info card — reflects the assessment action taken.
   const gradeChip =
     sub.assessmentStatus === "approved"
-      ? { label: "Graded", bg: "#E3FCEF", color: "#006644" }
+      ? { label: L.chipGraded, bg: "#E3FCEF", color: "#006644" }
       : sub.assessmentStatus === "not_approved"
-      ? { label: "Not approved", bg: "#FFEBE6", color: "#BF2600" }
+      ? { label: L.chipNotApproved, bg: "#FFEBE6", color: "#BF2600" }
       : sub.assessmentStatus === "resubmission_requested"
-      ? { label: "Resubmission requested", bg: "#EAE6FF", color: "#403294" }
-      : { label: "Not graded", bg: "#FFFAE6", color: "#6B4E00" };
+      ? { label: L.chipResubmissionRequested, bg: "#EAE6FF", color: "#403294" }
+      : { label: L.chipNotGraded, bg: "#FFFAE6", color: "#6B4E00" };
 
   // Mirrors renderAnnotatedPara's anchoring (first indexOf match within a
   // paragraph) to predict where a new selection would land. Overlapping an
@@ -998,20 +1830,19 @@ function TeacherDetail({
     if (!sel || sel.isCollapsed) return;
     const text = sel.toString().trim();
     if (!text) return;
-    // Annotating only works on the Annotations view — nudge, don't switch.
-    // In compare mode the sidebar is hidden, so the gate doesn't apply: the
-    // current version's pane is directly annotatable there.
+    // Selecting text is the annotate gesture, whatever the sidebar is showing:
+    // switch it to Annotations so the new card is visible, then carry on. The
+    // [sidebarView] effect below only clears popovers when leaving Annotations,
+    // so the picker opened here survives the switch.
     if (!viewingPast && sidebarView !== "annotations") {
-      onToast("info", "Click Annotations to annotate");
-      return;
+      setSidebarView("annotations");
+      onMobileSidebarOpen();
     }
     const clash = findSelectionClash(text);
     if (clash) {
       onToast(
         "warning",
-        clash === "overlap"
-          ? "Selection overlaps an existing annotation — adjust the selection or delete the annotation first"
-          : "This selection can't be annotated — select text within a single paragraph"
+        clash === "overlap" ? L.toastSelectionOverlap : L.toastSelectionUnanchored
       );
       window.getSelection()?.removeAllRanges();
       return;
@@ -1089,9 +1920,10 @@ function TeacherDetail({
             }}
           >
             <h2 style={{ fontSize: 16, fontWeight: 700, color: "#172B4D", marginBottom: 6 }}>
-              {TASK.title}
+              {L.taskTitle}
             </h2>
-            {versionLines(sub).length === 0 ? (
+            <TaskInstructions />
+            {versionLines(sub, L).length === 0 ? (
               <Lozenge status={sub.deliveryStatus} />
             ) : (
               /* Version history — newest first; status chips live on the
@@ -1100,8 +1932,8 @@ function TeacherDetail({
                  versions". */
               <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-start" }}>
                 {(showAllVersions
-                  ? versionLines(sub)
-                  : versionLines(sub).slice(0, VERSION_LINES_VISIBLE)
+                  ? versionLines(sub, L)
+                  : versionLines(sub, L).slice(0, VERSION_LINES_VISIBLE)
                 ).map((v) =>
                   v.isCurrent ? (
                     <div key={v.n} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -1148,11 +1980,11 @@ function TeacherDetail({
                       }}
                     >
                       {v.label}
-                      {viewVersion === v.n ? " · viewing" : ""}
+                      {viewVersion === v.n ? ` ${L.versionViewingSuffix}` : ""}
                     </button>
                   )
                 )}
-                {versionLines(sub).length > VERSION_LINES_VISIBLE && (
+                {versionLines(sub, L).length > VERSION_LINES_VISIBLE && (
                   <button
                     onClick={() => setShowAllVersions((s) => !s)}
                     style={{
@@ -1167,8 +1999,10 @@ function TeacherDetail({
                     }}
                   >
                     {showAllVersions
-                      ? "Hide previous versions"
-                      : `Display previous versions (${versionLines(sub).length - VERSION_LINES_VISIBLE})`}
+                      ? L.btnHidePrevVersions
+                      : fill(L.btnShowPrevVersions, {
+                          count: versionLines(sub, L).length - VERSION_LINES_VISIBLE,
+                        })}
                   </button>
                 )}
               </div>
@@ -1180,8 +2014,7 @@ function TeacherDetail({
             <div style={{ display: "flex", gap: 8, alignItems: "center", backgroundColor: "#FFFAE6", border: "1px solid #FFC400", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
               <span style={{ fontSize: 13, flexShrink: 0 }}>🕘</span>
               <p style={{ margin: 0, fontSize: 12, color: "#6B4E00", lineHeight: 1.5, flex: 1 }}>
-                Comparing <strong>Version-{viewVersion}</strong> (read-only) with the current{" "}
-                <strong>Version-{sub.version}</strong> — select text on the current version to annotate it.
+                <RichText text={fill(L.compareBannerTeacher, { n: viewVersion!, current: sub.version })} />
               </p>
               <button
                 className="no-print"
@@ -1199,7 +2032,7 @@ function TeacherDetail({
                   flexShrink: 0,
                 }}
               >
-                Back to current version
+                {L.btnBackToCurrent}
               </button>
             </div>
           )}
@@ -1209,9 +2042,9 @@ function TeacherDetail({
                  labels on a shared divider line, selected tab underlined. ── */}
           <div className={`no-print${mobileSidebarOpen ? "" : " drawer-closed"}`} style={{ display: "flex", alignItems: "center", marginBottom: 20, borderBottom: "2px solid #DFE1E6" }}>
             {([
-              { key: "activities", label: "🕘 Activities" },
-              { key: "annotations", label: "✎ Annotations" },
-              { key: "grading", label: "✓ Grading" },
+              { key: "activities", label: L.tabActivities },
+              { key: "annotations", label: L.tabAnnotations },
+              { key: "grading", label: L.tabGrading },
             ] as const).map((a) => {
               // Activities and Grading are always available (the teacher can
               // review the timeline or set a status — e.g. Excused — before
@@ -1277,8 +2110,7 @@ function TeacherDetail({
             <div className="no-print" style={{ display: "flex", gap: 8, alignItems: "flex-start", backgroundColor: "#DEEBFF", border: "1px solid #B3D4FF", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
               <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1.4 }}>💡</span>
               <p style={{ margin: 0, fontSize: 12, color: "#42526E", lineHeight: 1.5, flex: 1 }}>
-                To add an annotation, open the <strong>Annotations</strong> tab and select
-                the text you want to annotate.
+                <RichText text={L.hintAnnotate} />
               </p>
               <button
                 onClick={onDismissAnnHint}
@@ -1295,7 +2127,7 @@ function TeacherDetail({
                   flexShrink: 0,
                 }}
               >
-                Don't show again
+                {L.btnDontShowAgain}
               </button>
             </div>
           )}
@@ -1306,7 +2138,7 @@ function TeacherDetail({
             <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#6B4E00", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-                  Version-{viewVersion} — previous
+                  {fill(L.labelVersionPrevious, { n: viewVersion! })}
                 </div>
                 <div style={{ backgroundColor: "#fff", borderRadius: 4, border: "1px solid #DFE1E6", borderTop: "3px solid #FFC400", padding: 24 }}>
                   <AnnotatedText text={shownBody} anns={subAnns} />
@@ -1314,7 +2146,7 @@ function TeacherDetail({
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#0052CC", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-                  Version-{sub.version} — current
+                  {fill(L.labelVersionCurrent, { n: sub.version })}
                 </div>
                 <div style={{ backgroundColor: "#fff", borderRadius: 4, border: "1px solid #DFE1E6", borderTop: "3px solid #0052CC", padding: 24 }}>
                   <AnnotatedText text={sub.body} anns={currentAnns} onMouseUp={handleTextMouseUp} />
@@ -1347,9 +2179,9 @@ function TeacherDetail({
             >
               <div style={{ fontSize: 44, marginBottom: 12 }}>📄</div>
               <p style={{ fontSize: 15, marginBottom: 4, color: "#42526E", fontWeight: 500 }}>
-                No submission yet
+                {L.emptyNoSubmissionTitle}
               </p>
-              <p style={{ fontSize: 13 }}>{student.name} has not submitted their work.</p>
+              <p style={{ fontSize: 13 }}>{fill(L.emptyNoSubmissionBody, { student: student.name })}</p>
             </div>
           )}
 
@@ -1359,20 +2191,20 @@ function TeacherDetail({
             {/* Grading */}
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#172B4D", borderBottom: "1px solid #DFE1E6", paddingBottom: 6, marginBottom: 10 }}>
-                Grading
+                {L.panelGrading}
               </div>
               <p style={{ margin: "0 0 4px", fontSize: 12, color: "#172B4D", lineHeight: 1.6 }}>
-                Delivery: <strong>{LOZENGE_CFG[deliveryChipStatus(sub)]?.label ?? sub.deliveryStatus}</strong>
+                Delivery: <strong>{lozengeLabel(L, deliveryChipStatus(sub))}</strong>
                 {" · "}Assessment:{" "}
                 <strong>
                   {sub.assessmentStatus === "not_assessed"
-                    ? "Not graded"
-                    : LOZENGE_CFG[sub.assessmentStatus]?.label ?? sub.assessmentStatus}
+                    ? L.chipNotGraded
+                    : lozengeLabel(L, sub.assessmentStatus)}
                 </strong>
               </p>
               {sub.finalComment && (
                 <p style={{ margin: "0 0 4px", fontSize: 12, color: "#172B4D", lineHeight: 1.6 }}>
-                  Final comment: "{sub.finalComment}"
+                  {L.labelFinalComment}: "{sub.finalComment}"
                 </p>
               )}
               {sub.resubmissionMessage && (
@@ -1385,7 +2217,7 @@ function TeacherDetail({
             {/* Annotations & comments */}
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#172B4D", borderBottom: "1px solid #DFE1E6", paddingBottom: 6, marginBottom: 10 }}>
-                Annotations &amp; comments
+                {L.panelAnnotations}
               </div>
               {currentAnns.length === 0 && subComs.length === 0 ? (
                 <p style={{ margin: 0, fontSize: 12, color: "#6B778C", fontStyle: "italic" }}>None.</p>
@@ -1393,7 +2225,7 @@ function TeacherDetail({
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {currentAnns.map((ann) => (
                     <div key={ann.id} style={{ fontSize: 12, color: "#172B4D", lineHeight: 1.6, borderLeft: `3px solid ${ANN_COLORS[ann.type]}`, paddingLeft: 8 }}>
-                      <strong style={{ textTransform: "uppercase", fontSize: 10, letterSpacing: "0.06em", color: ANN_COLORS[ann.type] }}>{ann.type}</strong>{" "}
+                      <strong style={{ textTransform: "uppercase", fontSize: 10, letterSpacing: "0.06em", color: ANN_COLORS[ann.type] }}>{annTypeLabel(L, ann.type)}</strong>{" "}
                       "{ann.selectedText}"
                       {ann.note && <> — {ann.type === "text" ? `replaced with "${ann.note}"` : ann.note}</>}
                     </div>
@@ -1401,7 +2233,7 @@ function TeacherDetail({
                   {subComs.map((com) => (
                     <div key={com.id} style={{ fontSize: 12, color: "#172B4D", lineHeight: 1.6, borderLeft: "3px solid #0052CC", paddingLeft: 8 }}>
                       <strong style={{ textTransform: "uppercase", fontSize: 10, letterSpacing: "0.06em", color: "#0052CC" }}>
-                        {com.kind === "audio" ? "Audio" : "Comment"}
+                        {com.kind === "audio" ? L.chipAudio : L.chipComment}
                       </strong>{" "}
                       {getUser(com.authorId).name}: {com.text}
                     </div>
@@ -1413,27 +2245,27 @@ function TeacherDetail({
             {/* Activities */}
             <div>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#172B4D", borderBottom: "1px solid #DFE1E6", paddingBottom: 6, marginBottom: 10 }}>
-                Activities
+                {L.panelActivities}
               </div>
               {subEvents.length === 0 ? (
-                <p style={{ margin: 0, fontSize: 12, color: "#6B778C", fontStyle: "italic" }}>No activity yet.</p>
+                <p style={{ margin: 0, fontSize: 12, color: "#6B778C", fontStyle: "italic" }}>{L.emptyActivities}</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {subEvents.map((e) => {
                     const cfg = {
-                      assigned: "Assigned",
-                      submitted: "Submitted",
-                      resubmitted: "Resubmitted",
-                      resubmission_requested: "Requested resubmission",
-                      approved: "Approved",
-                      rejected: "Not approved",
-                      grading_undone: "Undid grading",
+                      assigned: fill(L.activityAssigned, { student: student.name }),
+                      submitted: L.activitySubmitted,
+                      resubmitted: L.activityResubmitted,
+                      resubmission_requested: L.activityResubmissionRequested,
+                      approved: L.activityApproved,
+                      rejected: L.activityRejected,
+                      grading_undone: L.activityUndone,
                     }[e.action];
                     return (
                       <p key={e.id} style={{ margin: 0, fontSize: 12, color: "#172B4D", lineHeight: 1.6 }}>
                         {fmtDate(e.createdAt)} {fmtTime(e.createdAt)} —{" "}
                         {e.action === "assigned" ? (
-                          <>'{TASK.title}' <strong>assigned to {student.name}</strong></>
+                          <>'{L.taskTitle}' <strong>{fill(L.activityAssigned, { student: student.name })}</strong></>
                         ) : (
                           <><strong>{getUser(e.actorId).name}</strong> {cfg}</>
                         )}
@@ -1465,10 +2297,10 @@ function TeacherDetail({
           <div style={{ padding: "11px 16px", borderBottom: "1px solid #DFE1E6", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <span style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#42526E" }}>
               {sidebarView === "annotations"
-                ? "Annotations & comments"
+                ? L.panelAnnotations
                 : sidebarView === "grading"
-                ? "Grading"
-                : "Activities"}
+                ? L.panelGrading
+                : L.panelActivities}
             </span>
             {/* Mobile only: closes the drawer */}
             <button
@@ -1489,7 +2321,7 @@ function TeacherDetail({
               <div style={{ padding: "40px 24px", textAlign: "center" }}>
                 <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
                 <p style={{ margin: 0, fontSize: 13, color: "#6B778C", lineHeight: 1.6 }}>
-                  Available after {student.name} has submitted their work.
+                  {fill(L.emptyAnnotationsLocked, { student: student.name })}
                 </p>
               </div>
             ) : sidebarView === "grading" ? (
@@ -1497,7 +2329,7 @@ function TeacherDetail({
               {/* Submission status — auto from the student, overridable by teacher */}
               <div style={{ marginBottom: 18 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-                  Submission status
+                  {L.headingSubmissionStatus}
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {((sub.submittedAt !== null
@@ -1530,7 +2362,7 @@ function TeacherDetail({
                           color: active ? cfg.color : "#6B778C",
                         }}
                       >
-                        {cfg.label}
+                        {lozengeLabel(L, st)}
                       </button>
                     );
                   })}
@@ -1539,31 +2371,30 @@ function TeacherDetail({
               {canAssess ? (
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#172B4D", marginBottom: 12 }}>
-                    Assess submission
+                    {L.headingAssessSubmission}
                   </div>
                   {awaitingResubmission && (
                     <div style={{ backgroundColor: "#EAE6FF", border: "1px solid #998DD9", borderRadius: 4, padding: "8px 10px", marginBottom: 12, fontSize: 12, color: "#403294", lineHeight: 1.5 }}>
-                      ↩ Resubmission requested — assessment is paused until {student.name} resubmits.
+                      {fill(L.noticeAssessmentPaused, { student: student.name })}
                       {sub.resubmissionMessage && (
                         <p style={{ margin: "6px 0 0", fontSize: 12, color: "#172B4D", lineHeight: 1.6, backgroundColor: "#fff", borderRadius: 3, padding: "6px 8px" }}>
-                          Your message: "{sub.resubmissionMessage}"
+                          {L.noticeYourMessage} "{sub.resubmissionMessage}"
                         </p>
                       )}
                     </div>
                   )}
                   {isExcused && (
                     <div style={{ backgroundColor: "#EAE6FF", border: "1px solid #998DD9", borderRadius: 4, padding: "8px 10px", marginBottom: 12, fontSize: 12, color: "#403294", lineHeight: 1.5 }}>
-                      Excused — the submission request is cancelled. {student.name} doesn't have to
-                      submit and no grading is required.
+                      {fill(L.noticeExcusedTeacher, { student: student.name })}
                     </div>
                   )}
                   {!isExcused && !awaitingResubmission && !hasBody && (
                     <div style={{ backgroundColor: "#F4F5F7", border: "1px solid #DFE1E6", borderRadius: 4, padding: "8px 10px", marginBottom: 12, fontSize: 12, color: "#6B778C", lineHeight: 1.5 }}>
-                      📝 No submission to grade yet — approve and reject unlock once {student.name} submits.
+                      {fill(L.noticeNothingToGrade, { student: student.name })}
                     </div>
                   )}
                   <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                    Final comment <span style={{ color: "#DE350B" }}>*</span>
+                    {L.labelFinalComment} <span style={{ color: "#DE350B" }}>*</span>
                   </label>
                   <textarea
                     value={finalComment}
@@ -1571,7 +2402,7 @@ function TeacherDetail({
                       setFinalComment(e.target.value);
                       if (finalCommentError && e.target.value.trim()) setFinalCommentError(false);
                     }}
-                    placeholder="Required before approving or rejecting…"
+                    placeholder={L.placeholderFinalComment}
                     rows={5}
                     disabled={!canGrade}
                     style={{ width: "100%", border: `2px solid ${finalCommentError ? "#DE350B" : "#DFE1E6"}`, borderRadius: 3, padding: "8px 10px", fontSize: 13, resize: "vertical", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#172B4D", lineHeight: 1.5, backgroundColor: !canGrade ? "#F4F5F7" : "#fff", marginBottom: finalCommentError ? 4 : 12 }}
@@ -1580,15 +2411,15 @@ function TeacherDetail({
                   />
                   {finalCommentError && (
                     <p style={{ margin: "0 0 12px", fontSize: 12, color: "#DE350B", lineHeight: 1.4 }}>
-                      ⚠ Add a final comment
+                      {L.errorFinalComment}
                     </p>
                   )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                    <Btn variant="primary" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); setModal("approve"); }}>✓ Approve</Btn>
-                    <Btn variant="danger" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); setModal("reject"); }}>✗ Reject</Btn>
+                    <Btn variant="primary" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); setModal("approve"); }}>{L.btnApprove}</Btn>
+                    <Btn variant="danger" fullWidth disabled={!canGrade} onClick={() => { if (!finalComment.trim()) { setFinalCommentError(true); return; } setFinalCommentError(false); setModal("reject"); }}>{L.btnReject}</Btn>
                     {/* Unlike approve/reject, no final comment is required —
                         the confirm pop-up tells the teacher what happens. */}
-                    <Btn variant="warning" fullWidth disabled={!canGrade} onClick={() => { setFinalCommentError(false); setModal("resubmit"); }}>↩ Request resubmission</Btn>
+                    <Btn variant="warning" fullWidth disabled={!canGrade} onClick={() => { setFinalCommentError(false); setModal("resubmit"); }}>{L.btnRequestResubmission}</Btn>
                   </div>
                 </div>
               ) : (
@@ -1598,7 +2429,7 @@ function TeacherDetail({
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: sub.finalComment ? 8 : 0 }}>
                         <span style={{ fontSize: 16, color: assessStatusColor.text }}>{assessStatusColor.icon}</span>
                         <span style={{ fontWeight: 700, fontSize: 13, color: assessStatusColor.text }}>
-                          {sub.assessmentStatus === "approved" ? "Approved" : "Not approved"}
+                          {sub.assessmentStatus === "approved" ? L.chipApproved : L.chipNotApproved}
                         </span>
                       </div>
                       {sub.finalComment && (
@@ -1607,7 +2438,7 @@ function TeacherDetail({
                     </div>
                   )}
                   <Btn variant="default" fullWidth onClick={() => setModal("undo")}>
-                    ↺ Undo grading
+                    {L.btnUndoGrading}
                   </Btn>
                 </div>
               )}
@@ -1618,7 +2449,7 @@ function TeacherDetail({
                 {subEvents.length === 0 ? (
                   <div style={{ textAlign: "center", paddingTop: 40, paddingBottom: 20 }}>
                     <div style={{ fontSize: 28, marginBottom: 10 }}>🕘</div>
-                    <p style={{ fontSize: 13, color: "#97A0AF", lineHeight: 1.5 }}>No activity yet.</p>
+                    <p style={{ fontSize: 13, color: "#97A0AF", lineHeight: 1.5 }}>{L.emptyActivities}</p>
                   </div>
                 ) : (
                   /* Newest first — the latest action is what the teacher
@@ -1626,13 +2457,13 @@ function TeacherDetail({
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {[...subEvents].reverse().map((e) => {
                       const cfg = {
-                        assigned: { label: `assigned to ${student.name}`, color: "#0747A6" },
-                        submitted: { label: "Submitted", color: "#0747A6" },
-                        resubmitted: { label: "Resubmitted", color: "#0747A6" },
-                        resubmission_requested: { label: "Requested resubmission", color: "#403294" },
-                        approved: { label: "Approved", color: "#006644" },
-                        rejected: { label: "Not approved", color: "#BF2600" },
-                        grading_undone: { label: "Undid grading", color: "#6B778C" },
+                        assigned: { label: fill(L.activityAssigned, { student: student.name }), color: "#0747A6" },
+                        submitted: { label: L.activitySubmitted, color: "#0747A6" },
+                        resubmitted: { label: L.activityResubmitted, color: "#0747A6" },
+                        resubmission_requested: { label: L.activityResubmissionRequested, color: "#403294" },
+                        approved: { label: L.activityApproved, color: "#006644" },
+                        rejected: { label: L.activityRejected, color: "#BF2600" },
+                        grading_undone: { label: L.activityUndone, color: "#6B778C" },
                       }[e.action];
                       const actor = getUser(e.actorId);
                       return (
@@ -1640,7 +2471,7 @@ function TeacherDetail({
                           <Avatar userId={e.actorId} size={22} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 12, color: "#172B4D", lineHeight: 1.4 }}>
-                              <strong>{e.action === "assigned" ? `'${TASK.title}'` : actor.name}</strong>{" "}
+                              <strong>{e.action === "assigned" ? `'${L.taskTitle}'` : actor.name}</strong>{" "}
                               <span style={{ color: cfg.color, fontWeight: 600 }}>{cfg.label}</span>
                             </div>
                             <div style={{ fontSize: 10, color: "#97A0AF", marginTop: 1 }}>
@@ -1692,7 +2523,7 @@ function TeacherDetail({
                   submissionId,
                   authorId: "teacher1",
                   kind: "audio",
-                  text: "Audio comment — 0:30",
+                  text: L.audioCommentLabel,
                   createdAt: new Date().toISOString(),
                 });
               };
@@ -1703,7 +2534,7 @@ function TeacherDetail({
                   {/* Unified feed */}
                   {feed.length === 0 ? (
                     <p style={{ fontSize: 13, color: "#97A0AF", fontStyle: "italic", textAlign: "center", marginTop: 20, marginBottom: 20 }}>
-                      No annotations or comments yet.
+                      {L.emptyFeed}
                     </p>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
@@ -1740,7 +2571,7 @@ function TeacherDetail({
                                     borderRadius: 3,
                                   }}
                                 >
-                                  {ann.type}
+                                  {annTypeLabel(L, ann.type)}
                                 </span>
                                 <span style={{ fontSize: 10, color: "#97A0AF" }}>
                                   {fmtDate(ann.createdAt)}
@@ -1750,24 +2581,24 @@ function TeacherDetail({
                                 /* Inline edit: anchor stays read-only, note/replacement is editable */
                                 <>
                                   <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>
-                                    {ann.type === "text" ? "Original" : "Selected text"}
+                                    {ann.type === "text" ? L.labelOriginal : L.labelSelectedText}
                                   </div>
                                   <p style={{ fontSize: 11, color: "#6B778C", fontStyle: "italic", textDecoration: ann.type === "text" ? "line-through" : undefined, margin: "0 0 6px", lineHeight: 1.45, paddingLeft: 8, borderLeft: `2px solid ${accentColor}40` }}>
                                     "{ann.selectedText.slice(0, 80)}{ann.selectedText.length > 80 ? "…" : ""}"
                                   </p>
                                   <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 4 }}>
-                                    {ann.type === "text" ? "Replaced with" : "Note"}
+                                    {ann.type === "text" ? L.labelReplacedWith : L.labelNote}
                                   </div>
                                   <EditBox onSave={(t) => onAnnotationEdit(ann.id, t)} />
                                 </>
                               ) : ann.type === "text" ? (
                                 /* Text replacement: show original → new */
                                 <>
-                                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>Original</div>
+                                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>{L.labelOriginal}</div>
                                   <p style={{ fontSize: 11, color: "#BF2600", fontStyle: "italic", textDecoration: "line-through", margin: "0 0 6px", lineHeight: 1.45, paddingLeft: 8, borderLeft: `2px solid ${accentColor}40` }}>
                                     "{ann.selectedText}"
                                   </p>
-                                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>Replaced with</div>
+                                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>{L.labelReplacedWith}</div>
                                   <p style={{ fontSize: 12, color: "#006644", fontWeight: 500, margin: 0, lineHeight: 1.55, paddingLeft: 8, borderLeft: `2px solid ${accentColor}40` }}>
                                     "{ann.note}"
                                   </p>
@@ -1805,16 +2636,16 @@ function TeacherDetail({
                                 {!isEditingThis && (
                                   <div style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
                                     <CardBtn
-                                      label="Edit"
+                                      label={L.btnEdit}
                                       onClick={() =>
                                         setEditing({ kind: "annotation", id: ann.id, text: ann.note })
                                       }
                                     />
                                     <CardBtn
-                                      label="Delete"
+                                      label={L.btnDelete}
                                       danger
                                       onClick={() => {
-                                        if (window.confirm("Delete this annotation? Any attached note will be removed too."))
+                                        if (window.confirm(L.confirmDeleteAnnotation))
                                           onAnnotationDelete(ann.id);
                                       }}
                                     />
@@ -1853,7 +2684,7 @@ function TeacherDetail({
                                     borderRadius: 3,
                                   }}
                                 >
-                                  {com.kind === "audio" ? "Audio" : "Comment"}
+                                  {com.kind === "audio" ? L.chipAudio : L.chipComment}
                                 </span>
                                 <span style={{ fontSize: 10, color: "#97A0AF" }}>
                                   {fmtDate(com.createdAt)}
@@ -1879,17 +2710,17 @@ function TeacherDetail({
                                   <div style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
                                     {com.kind === "text" && (
                                       <CardBtn
-                                        label="Edit"
+                                        label={L.btnEdit}
                                         onClick={() =>
                                           setEditing({ kind: "comment", id: com.id, text: com.text })
                                         }
                                       />
                                     )}
                                     <CardBtn
-                                      label="Delete"
+                                      label={L.btnDelete}
                                       danger
                                       onClick={() => {
-                                        if (window.confirm("Delete this comment?")) onCommentDelete(com.id);
+                                        if (window.confirm(L.confirmDeleteComment)) onCommentDelete(com.id);
                                       }}
                                     />
                                   </div>
@@ -1910,7 +2741,7 @@ function TeacherDetail({
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                       </svg>
                       <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#42526E" }}>
-                        Add comments
+                        {L.headingAddComments}
                       </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
@@ -1924,7 +2755,7 @@ function TeacherDetail({
                             sendText();
                           }
                         }}
-                        placeholder="Write a comment…"
+                        placeholder={L.placeholderComment}
                         rows={1}
                         style={{
                           flex: 1,
@@ -2016,7 +2847,7 @@ function TeacherDetail({
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#6B778C" }}>
-              Annotation types
+              {L.annTypesTitle}
             </span>
             <button
               onClick={() => { setAnnTypePopover(null); window.getSelection()?.removeAllRanges(); }}
@@ -2028,11 +2859,17 @@ function TeacherDetail({
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {(["highlight", "strikeout", "text"] as AnnotationType[]).map((type) => {
             const c = ANN_COLORS[type];
+            const typeLabel =
+              type === "text"
+                ? L.annTypeReplaceText
+                : type === "highlight"
+                ? L.annTypeHighlight
+                : L.annTypeStrikeout;
             return (
               <button
                 key={type}
                 onClick={() => handleTypePick(type)}
-                title={type === "text" ? "replace text" : type}
+                title={typeLabel}
                 style={{
                   padding: "4px 10px",
                   borderRadius: 3,
@@ -2049,7 +2886,7 @@ function TeacherDetail({
                 onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = `${c}35`)}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = `${c}18`)}
               >
-                {type === "text" ? "Replace text" : type}
+                {typeLabel}
               </button>
             );
           })}
@@ -2085,7 +2922,11 @@ function TeacherDetail({
               marginBottom: 8,
             }}
           >
-            {activeAnnType === "text" ? "Replace text" : `Add ${activeAnnType} annotation`}
+            {activeAnnType === "text"
+              ? L.annTypeReplaceText
+              : fill(L.annPopoverTitle, {
+                  type: activeAnnType === "highlight" ? L.annTypeHighlight : L.annTypeStrikeout,
+                })}
           </div>
           <p
             style={{
@@ -2105,7 +2946,7 @@ function TeacherDetail({
           <textarea
             value={annNote}
             onChange={(e) => setAnnNote(e.target.value)}
-            placeholder={activeAnnType === "text" ? "Enter replacement text…" : "Add a note (optional)…"}
+            placeholder={activeAnnType === "text" ? L.annReplacementPlaceholder : L.annNotePlaceholder}
             autoFocus
             style={{
               width: "100%",
@@ -2133,10 +2974,10 @@ function TeacherDetail({
                 window.getSelection()?.removeAllRanges();
               }}
             >
-              Cancel
+              {L.btnCancel}
             </Btn>
             <Btn small variant="primary" onClick={saveAnnotation}>
-              Save
+              {L.btnSave}
             </Btn>
           </div>
         </div>
@@ -2145,9 +2986,9 @@ function TeacherDetail({
       {/* Modals */}
       {modal === "approve" && (
         <ConfirmModal
-          title="Approve submission"
-          body={`Approve ${student.name}'s submission with the final comment provided?`}
-          confirmLabel="Approve"
+          title={L.modalApproveTitle}
+          body={fill(L.modalApproveBody, { student: student.name })}
+          confirmLabel={L.modalApproveConfirm}
           confirmVariant="primary"
           onCancel={() => setModal(null)}
           onConfirm={() => {
@@ -2158,9 +2999,9 @@ function TeacherDetail({
       )}
       {modal === "reject" && (
         <ConfirmModal
-          title="Reject submission"
-          body={`Mark ${student.name}'s submission as Not Approved?`}
-          confirmLabel="Reject"
+          title={L.modalRejectTitle}
+          body={fill(L.modalRejectBody, { student: student.name })}
+          confirmLabel={L.modalRejectConfirm}
           confirmVariant="danger"
           onCancel={() => setModal(null)}
           onConfirm={() => {
@@ -2171,13 +3012,12 @@ function TeacherDetail({
       )}
       {modal === "resubmit" && (
         <ConfirmModal
-          title="Request resubmission"
-          body={`Ask ${student.name} to revise and resubmit their work? Assessment is paused until they resubmit.${
-            finalComment.trim()
-              ? " Your final comment is sent to the student along with the request."
-              : " You haven't written a final comment — the request is sent without a message."
-          }`}
-          confirmLabel="Request resubmission"
+          title={L.modalResubmitTitle}
+          body={
+            fill(L.modalResubmitBody, { student: student.name }) +
+            (finalComment.trim() ? L.modalResubmitWithComment : L.modalResubmitNoComment)
+          }
+          confirmLabel={L.modalResubmitConfirm}
           confirmVariant="warning"
           onCancel={() => setModal(null)}
           onConfirm={() => {
@@ -2189,9 +3029,9 @@ function TeacherDetail({
       )}
       {modal === "excuse" && (
         <ConfirmModal
-          title="Excuse student"
-          body={`Are you sure you want to excuse ${student.name} from this assignment? This cancels the submission request — ${student.name} will not submit, and no grading is required.`}
-          confirmLabel="Excuse student"
+          title={L.modalExcuseTitle}
+          body={fill(L.modalExcuseBody, { student: student.name })}
+          confirmLabel={L.modalExcuseConfirm}
           confirmVariant="warning"
           onCancel={() => setModal(null)}
           onConfirm={() => {
@@ -2202,9 +3042,9 @@ function TeacherDetail({
       )}
       {modal === "undo" && (
         <ConfirmModal
-          title="Undo grading"
-          body={`Undo the grading of ${student.name}'s submission? The result is reverted and the submission can be assessed again.`}
-          confirmLabel="Undo grading"
+          title={L.modalUndoTitle}
+          body={fill(L.modalUndoBody, { student: student.name })}
+          confirmLabel={L.modalUndoConfirm}
           confirmVariant="default"
           onCancel={() => setModal(null)}
           onConfirm={() => {
@@ -2255,6 +3095,7 @@ function FeedbackSidebar({
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }) {
+  const L = useLabels();
   const feedCount = subAnns.length + subComs.length;
   // Card currently in passage-edit mode (revision only).
   const [editingAnnId, setEditingAnnId] = useState<string | null>(null);
@@ -2264,11 +3105,11 @@ function FeedbackSidebar({
   }, [!onAnnEditSave]);
   const assessStatusColor =
     sub.assessmentStatus === "approved"
-      ? { bg: "#E3FCEF", border: "#57D9A3", color: "#006644", icon: "✓", label: "Approved" }
+      ? { bg: "#E3FCEF", border: "#57D9A3", color: "#006644", icon: "✓", label: L.chipApproved }
       : sub.assessmentStatus === "not_approved"
-      ? { bg: "#FFEBE6", border: "#FF8F73", color: "#BF2600", icon: "✗", label: "Not Approved" }
+      ? { bg: "#FFEBE6", border: "#FF8F73", color: "#BF2600", icon: "✗", label: L.chipNotApproved }
       : sub.assessmentStatus === "resubmission_requested"
-      ? { bg: "#EAE6FF", border: "#998DD9", color: "#403294", icon: "↩", label: "Resubmission requested" }
+      ? { bg: "#EAE6FF", border: "#998DD9", color: "#403294", icon: "↩", label: L.chipResubmissionRequested }
       : null;
 
   type FeedItem =
@@ -2305,7 +3146,7 @@ function FeedbackSidebar({
         }}
       >
         <span style={{ fontSize: 12, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          Feedback
+          {L.feedbackTitle}
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           {/* Mobile only: closes the drawer */}
@@ -2332,7 +3173,7 @@ function FeedbackSidebar({
           <div style={{ textAlign: "center", paddingTop: 40, paddingBottom: 20 }}>
             <div style={{ fontSize: 28, marginBottom: 10 }}>💬</div>
             <p style={{ fontSize: 13, color: "#97A0AF", lineHeight: 1.5 }}>
-              Feedback from your teacher will appear here after review.
+              {L.feedbackEmpty}
             </p>
           </div>
         )}
@@ -2399,7 +3240,7 @@ function FeedbackSidebar({
                         <>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
                             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: ac, backgroundColor: `${ac}14`, padding: "2px 6px", borderRadius: 3 }}>
-                              {ann.type}
+                              {annTypeLabel(L, ann.type)}
                             </span>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                               {canEdit && !isEditing && (
@@ -2412,7 +3253,7 @@ function FeedbackSidebar({
                                   title="Edit this passage in your revision"
                                   style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: "#0052CC", padding: "1px 4px" }}
                                 >
-                                  ✎ Edit
+                                  ✎ {L.btnEdit}
                                 </button>
                               )}
                               <span style={{ fontSize: 10, color: "#97A0AF" }}>{fmtDate(ann.createdAt)}</span>
@@ -2421,11 +3262,11 @@ function FeedbackSidebar({
                           {ann.type === "text" ? (
                             /* Text replacement: show original → new */
                             <div style={{ marginBottom: 8 }}>
-                              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>Original</div>
+                              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>{L.labelOriginal}</div>
                               <p style={{ fontSize: 11, color: "#BF2600", fontStyle: "italic", textDecoration: "line-through", margin: "0 0 6px", lineHeight: 1.45, paddingLeft: 8, borderLeft: `2px solid ${ac}40` }}>
                                 "{ann.selectedText}"
                               </p>
-                              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>Replaced with</div>
+                              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#97A0AF", marginBottom: 2 }}>{L.labelReplacedWith}</div>
                               <p style={{ fontSize: 12, color: "#006644", fontWeight: 500, margin: 0, lineHeight: 1.55, paddingLeft: 8, borderLeft: `2px solid ${ac}40` }}>
                                 "{ann.note}"
                               </p>
@@ -2449,7 +3290,7 @@ function FeedbackSidebar({
                                   onClick={() => setEditingAnnId(null)}
                                   style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: "#42526E", padding: "2px 5px" }}
                                 >
-                                  Cancel
+                                  {L.btnCancel}
                                 </button>
                                 <button
                                   onClick={() => {
@@ -2458,7 +3299,7 @@ function FeedbackSidebar({
                                   }}
                                   style={{ background: "#0052CC", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: "#fff", padding: "3px 10px", borderRadius: 3 }}
                                 >
-                                  Save
+                                  {L.btnSave}
                                 </button>
                               </div>
                             </div>
@@ -2497,7 +3338,7 @@ function FeedbackSidebar({
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: cc, backgroundColor: `${cc}14`, padding: "2px 6px", borderRadius: 3 }}>
-                        {com.kind === "audio" ? "Audio" : "Comment"}
+                        {com.kind === "audio" ? L.chipAudio : L.chipComment}
                       </span>
                       <span style={{ fontSize: 10, color: "#97A0AF" }}>{fmtDate(com.createdAt)}</span>
                     </div>
@@ -2547,6 +3388,7 @@ function StudentView({
   mobileSidebarOpen: boolean;
   onMobileSidebarClose: () => void;
 }) {
+  const L = useLabels();
   const sub = submissions.find((s) => s.id === submissionId)!;
   // The student-only revision in progress: a next-version document nobody
   // else can see until it is resubmitted.
@@ -2606,12 +3448,14 @@ function StudentView({
     else setDraft(t);
   };
   const wordCount = editorText.trim().split(/\s+/).filter(Boolean).length;
+  // Minimum word count is template-driven; 0 (or a non-number) turns it off.
+  const minWords = Math.max(0, parseInt(L.minWords, 10) || 0);
 
   const editorTextarea = (minHeight: number) => (
     <textarea
       value={editorText}
       onChange={(e) => setEditorText(e.target.value)}
-      placeholder="Write your reflection here…"
+      placeholder={L.placeholderEditor}
       style={{
         width: "100%",
         minHeight,
@@ -2635,15 +3479,17 @@ function StudentView({
   const editorFooter = (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, gap: 12, flexWrap: "wrap" }}>
       <span style={{ fontSize: 12, color: "#6B778C" }}>
-        {wordCount} words{" "}
-        {wordCount < 400 && (
-          <span style={{ color: "#FF991F" }}>· {400 - wordCount} more to reach minimum</span>
+        {fill(L.wordCount, { count: wordCount })}{" "}
+        {minWords > 0 && wordCount < minWords && (
+          <span style={{ color: "#FF991F" }}>
+            {fill(L.wordCountRemaining, { remaining: minWords - wordCount })}
+          </span>
         )}
       </span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {revising && (
           <Btn variant="subtle" onClick={() => onDiscardDraft(sub.id)}>
-            Discard draft
+            {L.btnDiscardDraft}
           </Btn>
         )}
         <Btn
@@ -2654,7 +3500,7 @@ function StudentView({
             else onSubmit(sub.id, editorText);
           }}
         >
-          {revising ? `↩ Resubmit version-${currentVersionN}` : "Submit"}
+          {revising ? fill(L.btnResubmit, { n: currentVersionN }) : L.btnSubmit}
         </Btn>
       </div>
     </div>
@@ -2676,15 +3522,16 @@ function StudentView({
           }}
         >
           <h2 style={{ fontSize: 16, fontWeight: 700, color: "#172B4D", marginBottom: 6 }}>
-            {TASK.title}
+            {L.taskTitle}
           </h2>
-          {versionLines(sub, true).length === 0 ? (
+          <TaskInstructions />
+          {versionLines(sub, L, true).length === 0 ? (
             <Lozenge status={sub.deliveryStatus} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-start" }}>
               {(showAllVersions
-                ? versionLines(sub, true)
-                : versionLines(sub, true).slice(0, VERSION_LINES_VISIBLE)
+                ? versionLines(sub, L, true)
+                : versionLines(sub, L, true).slice(0, VERSION_LINES_VISIBLE)
               ).map((v) =>
                 v.isCurrent ? (
                   <div key={v.n} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -2720,11 +3567,11 @@ function StudentView({
                     }}
                   >
                     {v.label}
-                    {viewVersion === v.n ? " · viewing" : ""}
+                    {viewVersion === v.n ? ` ${L.versionViewingSuffix}` : ""}
                   </button>
                 )
               )}
-              {versionLines(sub, true).length > VERSION_LINES_VISIBLE && (
+              {versionLines(sub, L, true).length > VERSION_LINES_VISIBLE && (
                 <button
                   onClick={() => setShowAllVersions((s) => !s)}
                   style={{
@@ -2739,8 +3586,10 @@ function StudentView({
                   }}
                 >
                   {showAllVersions
-                    ? "Hide previous versions"
-                    : `Display previous versions (${versionLines(sub, true).length - VERSION_LINES_VISIBLE})`}
+                    ? L.btnHidePrevVersions
+                    : fill(L.btnShowPrevVersions, {
+                        count: versionLines(sub, L, true).length - VERSION_LINES_VISIBLE,
+                      })}
                 </button>
               )}
             </div>
@@ -2752,9 +3601,12 @@ function StudentView({
           <div style={{ display: "flex", gap: 8, alignItems: "center", backgroundColor: "#FFFAE6", border: "1px solid #FFC400", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
             <span style={{ fontSize: 13, flexShrink: 0 }}>🕘</span>
             <p style={{ margin: 0, fontSize: 12, color: "#6B4E00", lineHeight: 1.5, flex: 1 }}>
-              Comparing <strong>version-{viewVersion}</strong> and its annotations (read-only) with{" "}
-              <strong>version-{currentVersionN}</strong>
-              {revising ? " — your draft, which you can keep editing here." : "."}
+              <RichText
+                text={fill(revising ? L.compareBannerStudentDraft : L.compareBannerStudent, {
+                  n: viewVersion!,
+                  current: currentVersionN,
+                })}
+              />
             </p>
             <button
               onClick={() => setViewVersion(null)}
@@ -2771,7 +3623,7 @@ function StudentView({
                 flexShrink: 0,
               }}
             >
-              {revising ? "Back to draft" : "Back to current version"}
+              {revising ? L.btnBackToDraft : L.btnBackToCurrent}
             </button>
           </div>
         )}
@@ -2781,7 +3633,7 @@ function StudentView({
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start", backgroundColor: "#EAE6FF", border: "1px solid #998DD9", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
             <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1.4 }}>✓</span>
             <p style={{ margin: 0, fontSize: 12, color: "#403294", lineHeight: 1.5, flex: 1 }}>
-              You have been excused from this assignment — you don't need to submit.
+              {L.noticeExcusedStudent}
             </p>
           </div>
         )}
@@ -2792,7 +3644,7 @@ function StudentView({
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start", backgroundColor: "#EAE6FF", border: "1px solid #998DD9", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
             <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1.4 }}>⏳</span>
             <p style={{ margin: 0, fontSize: 12, color: "#403294", lineHeight: 1.5, flex: 1 }}>
-              Your submission is awaiting review by your teacher.
+              {L.noticeAwaitingReview}
             </p>
           </div>
         )}
@@ -2814,7 +3666,7 @@ function StudentView({
           >
             <span>↩</span>
             <div style={{ flex: 1 }}>
-              <div>Your teacher has requested a resubmission. Please revise your work and resubmit.</div>
+              <div>{L.noticeResubmissionRequested}</div>
               {sub.resubmissionMessage && (
                 <p style={{ margin: "6px 0 0", fontWeight: 600, lineHeight: 1.5 }}>
                   "{sub.resubmissionMessage}"
@@ -2829,10 +3681,7 @@ function StudentView({
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start", backgroundColor: "#FFFAE6", border: "1px solid #FFC400", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
             <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1.4 }}>✎</span>
             <p style={{ margin: 0, fontSize: 12, color: "#6B4E00", lineHeight: 1.5, flex: 1 }}>
-              <strong>Version-{currentVersionN} is a draft only you can see.</strong> It starts as a clean
-              copy of version-{sub.version} — the teacher's marks are not carried over. Open{" "}
-              <strong>version-{sub.version}</strong> above to read them side by side. Your teacher sees
-              nothing until you resubmit.
+              <RichText text={fill(L.noticeDraftPrivate, { n: currentVersionN, prev: sub.version })} />
             </p>
           </div>
         )}
@@ -2844,7 +3693,7 @@ function StudentView({
           <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#6B4E00", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-                Version-{viewVersion} — annotated by your teacher
+                {fill(L.labelVersionAnnotated, { n: viewVersion! })}
               </div>
               <div style={{ backgroundColor: "#fff", borderRadius: 4, border: "1px solid #DFE1E6", borderTop: "3px solid #FFC400", padding: 24 }}>
                 <AnnotatedText text={shownBody} anns={pastAnns} onAnnClick={focusAnn} />
@@ -2852,7 +3701,7 @@ function StudentView({
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: revising ? "#6B4E00" : "#0052CC", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-                Version-{currentVersionN} — {revising ? "your draft" : "current"}
+                {fill(revising ? L.labelVersionDraft : L.labelVersionCurrent, { n: currentVersionN })}
               </div>
               {revising ? (
                 <>
@@ -2870,7 +3719,7 @@ function StudentView({
           /* ── Editor mode ── */
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-              {revising ? `Your revised submission — version-${currentVersionN}` : "Your submission"}
+              {revising ? fill(L.headingYourRevision, { n: currentVersionN }) : L.headingYourSubmission}
             </div>
             {editorTextarea(320)}
             {editorFooter}
@@ -2879,7 +3728,7 @@ function StudentView({
           /* ── Read-only submission text ── */
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-              Your submission
+              {L.headingYourSubmission}
             </div>
             <div
               style={{
@@ -2894,7 +3743,7 @@ function StudentView({
             {resubmissionOpen && (
               <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
                 <Btn variant="primary" onClick={() => onStartRevision(sub.id)}>
-                  ↩ Revise &amp; resubmit
+                  {L.btnReviseResubmit}
                 </Btn>
               </div>
             )}
@@ -2935,6 +3784,7 @@ function SupervisorView({
   mobileSidebarOpen: boolean;
   onMobileSidebarClose: () => void;
 }) {
+  const L = useLabels();
   const sub = submissions.find((s) => s.id === submissionId)!;
   // Which version is on screen: null = current, otherwise an archived one.
   const [viewVersion, setViewVersion] = useState<number | null>(null);
@@ -2973,18 +3823,18 @@ function SupervisorView({
         >
           {/* Task title */}
           <h2 style={{ fontSize: 16, fontWeight: 700, color: "#172B4D", marginBottom: 6 }}>
-            {TASK.title}
+            {L.taskTitle}
           </h2>
 
           {/* Meta row */}
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            {versionLines(sub).length === 0 ? (
+            {versionLines(sub, L).length === 0 ? (
               <Lozenge status={sub.deliveryStatus} />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-start" }}>
                 {(showAllVersions
-                  ? versionLines(sub)
-                  : versionLines(sub).slice(0, VERSION_LINES_VISIBLE)
+                  ? versionLines(sub, L)
+                  : versionLines(sub, L).slice(0, VERSION_LINES_VISIBLE)
                 ).map((v) =>
                   v.isCurrent ? (
                     <div key={v.n} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -3010,11 +3860,11 @@ function SupervisorView({
                       }}
                     >
                       {v.label}
-                      {viewVersion === v.n ? " · viewing" : ""}
+                      {viewVersion === v.n ? ` ${L.versionViewingSuffix}` : ""}
                     </button>
                   )
                 )}
-                {versionLines(sub).length > VERSION_LINES_VISIBLE && (
+                {versionLines(sub, L).length > VERSION_LINES_VISIBLE && (
                   <button
                     onClick={() => setShowAllVersions((s) => !s)}
                     style={{
@@ -3029,8 +3879,10 @@ function SupervisorView({
                     }}
                   >
                     {showAllVersions
-                      ? "Hide previous versions"
-                      : `Display previous versions (${versionLines(sub).length - VERSION_LINES_VISIBLE})`}
+                      ? L.btnHidePrevVersions
+                      : fill(L.btnShowPrevVersions, {
+                          count: versionLines(sub, L).length - VERSION_LINES_VISIBLE,
+                        })}
                   </button>
                 )}
               </div>
@@ -3063,7 +3915,7 @@ function SupervisorView({
                 flexShrink: 0,
               }}
             >
-              Back to current version
+              {L.btnBackToCurrent}
             </button>
           </div>
         )}
@@ -3081,8 +3933,17 @@ function SupervisorView({
 }
 
 // ─── App root ────────────────────────────────────────────────────────────────
+// The nav has one entry per role that is switchable in the prototype, plus
+// the Template editor. "supervisor" is no longer offered in the switcher.
+type NavView = "template" | "teacher" | "student" | "supervisor";
+
 export default function App() {
-  const [role, setRole] = useState<Role>("teacher");
+  const [role, setRole] = useState<NavView>("teacher");
+  // Editable UI text. Session-only, like every other bit of state here.
+  const [labels, setLabels] = useState<Labels>(DEFAULT_LABELS);
+  const L = labels;
+  const setLabel = (key: LabelKey, value: string) =>
+    setLabels((ls) => ({ ...ls, [key]: value }));
   const [selectedSubId, setSelectedSubId] = useState("sub1");
   const studentAs = "student1";
   const [supervisorSubId, setSupervisorSubId] = useState("sub1");
@@ -3118,39 +3979,39 @@ export default function App() {
 
   const handleAnnotationAdd = (ann: Omit<Annotation, "id">) => {
     setAnnotations((a) => [...a, { ...ann, id: uid() }]);
-    addToast("success", "Annotation added");
+    addToast("success", L.toastAnnotationAdded);
   };
 
   const handleAnnotationEdit = (id: string, note: string) => {
     setAnnotations((a) => a.map((x) => (x.id === id ? { ...x, note } : x)));
-    addToast("success", "Annotation updated");
+    addToast("success", L.toastAnnotationUpdated);
   };
 
   const handleAnnotationDelete = (id: string) => {
     setAnnotations((a) => a.filter((x) => x.id !== id));
-    addToast("info", "Annotation deleted");
+    addToast("info", L.toastAnnotationDeleted);
   };
 
   const handleCommentAdd = (com: Omit<Comment, "id">) => {
     setComments((c) => [...c, { ...com, id: uid() }]);
-    addToast("success", com.kind === "audio" ? "Audio comment added" : "Comment added");
+    addToast("success", com.kind === "audio" ? L.toastAudioCommentAdded : L.toastCommentAdded);
   };
 
   const handleCommentEdit = (id: string, text: string) => {
     setComments((c) => c.map((x) => (x.id === id ? { ...x, text } : x)));
-    addToast("success", "Comment updated");
+    addToast("success", L.toastCommentUpdated);
   };
 
   const handleCommentDelete = (id: string) => {
     setComments((c) => c.filter((x) => x.id !== id));
-    addToast("info", "Comment deleted");
+    addToast("info", L.toastCommentDeleted);
   };
 
   const handleDeliveryStatusChange = (subId: string, status: DeliveryStatus) => {
     setSubmissions((subs) =>
       subs.map((s) => (s.id === subId ? { ...s, deliveryStatus: status } : s))
     );
-    addToast("info", `Status set to ${LOZENGE_CFG[status]?.label ?? status}`);
+    addToast("info", fill(L.toastStatusSet, { status: lozengeLabel(L, status) }));
   };
 
   const handleAssessAction = (
@@ -3179,9 +4040,9 @@ export default function App() {
       })
     );
     const msgs = {
-      approve: "✓ Submission approved",
-      reject: "Submission marked Not Approved",
-      resubmit: "Resubmission requested",
+      approve: L.toastApproved,
+      reject: L.toastRejected,
+      resubmit: L.toastResubmissionRequested,
     };
     addToast("success", msgs[action]);
     const eventAction: GradingEventAction =
@@ -3197,7 +4058,7 @@ export default function App() {
         s.id !== subId ? s : { ...s, assessmentStatus: "not_assessed", finalComment: null }
       )
     );
-    addToast("info", "Grading undone — the submission can be assessed again");
+    addToast("info", L.toastGradingUndone);
     addEvent(subId, "teacher1", "grading_undone");
   };
 
@@ -3218,7 +4079,7 @@ export default function App() {
           : { ...s, body, deliveryStatus: isLate ? "late" : "submitted", submittedAt: new Date().toISOString() }
       )
     );
-    addToast("success", "Submission sent successfully!");
+    addToast("success", L.toastSubmitted);
     addEvent(id, sub.studentId, "submitted");
   };
 
@@ -3249,7 +4110,7 @@ export default function App() {
             }
       )
     );
-    addToast("success", "Resubmission sent!");
+    addToast("success", L.toastResubmitted);
     addEvent(id, sub.studentId, "resubmitted");
   };
 
@@ -3267,7 +4128,7 @@ export default function App() {
             }
       )
     );
-    addToast("info", "Draft version created — only you can see it until you resubmit");
+    addToast("info", L.toastDraftCreated);
   };
 
   const handleDraftChange = (id: string, body: string) => {
@@ -3278,17 +4139,25 @@ export default function App() {
 
   const handleDiscardDraft = (id: string) => {
     setSubmissions((subs) => subs.map((s) => (s.id !== id ? s : { ...s, draft: null })));
-    addToast("info", "Draft discarded");
+    addToast("info", L.toastDraftDiscarded);
   };
 
   const studentSub = submissions.find((s) => s.studentId === studentAs)!;
-  const ROLE_ACCENT: Record<Role, string> = {
+  const NAV_ACCENT: Record<NavView, string> = {
+    template: "#6554C0",
     teacher: "#0052CC",
     student: "#36B37E",
-    supervisor: "#6554C0",
+    supervisor: "#403294",
+  };
+  const NAV_LABEL: Record<NavView, string> = {
+    template: L.navTemplate,
+    teacher: L.navTeacher,
+    student: L.navStudent,
+    supervisor: "Supervisor",
   };
 
   return (
+    <LabelsCtx.Provider value={labels}>
     <div
       className="print-flow"
       style={{
@@ -3383,10 +4252,10 @@ export default function App() {
             M
           </div>
           <span style={{ fontWeight: 700, fontSize: 16, letterSpacing: "-0.2px" }}>
-            MOSO InPraxis
+            {L.appName}
           </span>
           <span style={{ color: "rgba(179,212,255,0.7)", fontSize: 12, marginLeft: 2 }}>
-            / Supervision
+            {L.appSection}
           </span>
         </div>
 
@@ -3402,7 +4271,7 @@ export default function App() {
             borderRadius: 6,
           }}
         >
-          {(["teacher", "student", "supervisor"] as Role[]).map((r) => (
+          {(["template", "teacher", "student"] as NavView[]).map((r) => (
             <button
               key={r}
               onClick={() => {
@@ -3418,15 +4287,15 @@ export default function App() {
                 border: "none",
                 cursor: "pointer",
                 backgroundColor: role === r ? "#fff" : "transparent",
-                color: role === r ? ROLE_ACCENT[r] : "rgba(255,255,255,0.75)",
+                color: role === r ? NAV_ACCENT[r] : "rgba(255,255,255,0.75)",
                 fontWeight: role === r ? 700 : 400,
                 fontSize: 13,
-                textTransform: "capitalize",
+                whiteSpace: "nowrap",
                 transition: "all 0.15s",
                 fontFamily: "inherit",
               }}
             >
-              {r}
+              {NAV_LABEL[r]}
             </button>
           ))}
         </div>
@@ -3434,7 +4303,7 @@ export default function App() {
         {/* Current user avatar */}
         <Avatar
           userId={
-            role === "teacher"
+            role === "teacher" || role === "template"
               ? "teacher1"
               : role === "supervisor"
               ? "supervisor1"
@@ -3444,7 +4313,8 @@ export default function App() {
         />
       </nav>
 
-      {/* ── Page header ── */}
+      {/* ── Page header (not shown in the Template view) ── */}
+      {role !== "template" && (
       <div
         className="no-print"
         style={{
@@ -3479,7 +4349,7 @@ export default function App() {
             return (
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 12, color: "#6B778C", fontWeight: 500, whiteSpace: "nowrap" }}>
-                  {isTeacher ? "Assessing:" : "Viewing:"}
+                  {isTeacher ? L.headerAssessing : L.headerViewing}
                 </span>
 
                 <div style={{ position: "relative" }}>
@@ -3571,7 +4441,7 @@ export default function App() {
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {role === "teacher" && (
-            <Btn variant="default" small onClick={() => window.print()}>↓ Download PDF</Btn>
+            <Btn variant="default" small onClick={() => window.print()}>{L.btnDownloadPdf}</Btn>
           )}
           {/* Mobile only: opens the right sidebar drawer */}
           <button
@@ -3598,6 +4468,7 @@ export default function App() {
           </button>
         </div>
       </div>
+      )}
 
       {/* ── Main content ── */}
       <div
@@ -3609,6 +4480,17 @@ export default function App() {
           flexDirection: "column",
         }}
       >
+        {role === "template" && (
+          <TemplateView
+            labels={labels}
+            onChange={setLabel}
+            onReset={() => {
+              setLabels(DEFAULT_LABELS);
+              addToast("info", "Template reset to defaults");
+            }}
+          />
+        )}
+
         {role === "teacher" && (
             <TeacherDetail
               key={selectedSubId}
@@ -3668,5 +4550,6 @@ export default function App() {
 
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>
+    </LabelsCtx.Provider>
   );
 }
