@@ -26,6 +26,14 @@ interface PastVersion {
   submittedAt: string | null;
   outcome: "resubmission_requested" | "rejected";
 }
+// A revision the student has started but not yet resubmitted — the "temp"
+// next version. It lives only on the student's screen: the teacher and
+// supervisor keep seeing the delivered version until the student resubmits.
+interface DraftVersion {
+  n: number;
+  body: string;
+  startedAt: string;
+}
 interface Submission {
   id: string;
   studentId: string;
@@ -40,6 +48,8 @@ interface Submission {
   resubmissionMessage: string | null;
   version: number;
   pastVersions: PastVersion[];
+  // Student-only work in progress; null unless a revision is open.
+  draft: DraftVersion | null;
 }
 interface Annotation {
   id: string;
@@ -108,6 +118,7 @@ const SUBS_INIT: Submission[] = [
     resubmissionMessage: null,
     version: 1,
     pastVersions: [],
+    draft: null,
   },
 ];
 
@@ -159,19 +170,37 @@ function uid(): string {
 // Past versions carry their delivery + outcome as text; the current version's
 // line is just the version number — its status lives in the chips rendered
 // inline next to it.
-function versionLines(sub: Submission): { n: number; label: string; isCurrent: boolean }[] {
+interface VersionLine {
+  n: number;
+  label: string;
+  isCurrent: boolean;
+  // The student's unsent draft — rendered only in the student's own view.
+  isDraft: boolean;
+}
+
+function versionLines(sub: Submission, includeDraft = false): VersionLine[] {
   if (!sub.submittedAt) return [];
   const name = (n: number) => (n === 1 ? "Submitted" : "Resubmitted");
-  const lines = sub.pastVersions.map((p) => ({
+  const draft = includeDraft ? sub.draft : null;
+  const lines: VersionLine[] = sub.pastVersions.map((p) => ({
     n: p.n,
     label: `Version-${p.n} - ${name(p.n)} - ${p.outcome === "rejected" ? "Rejected" : "Resubmission requested"}`,
     isCurrent: false,
+    isDraft: false,
   }));
-  lines.push({
-    n: sub.version,
-    label: `Version-${sub.version}`,
-    isCurrent: true,
-  });
+  // The delivered version. Once a draft is open it is no longer the line on
+  // screen, so it carries its status as text like an archived version does.
+  lines.push(
+    draft
+      ? {
+          n: sub.version,
+          label: `Version-${sub.version} - ${name(sub.version)} - Resubmission requested`,
+          isCurrent: false,
+          isDraft: false,
+        }
+      : { n: sub.version, label: `Version-${sub.version}`, isCurrent: true, isDraft: false }
+  );
+  if (draft) lines.push({ n: draft.n, label: `Version-${draft.n}`, isCurrent: true, isDraft: true });
   return lines.reverse();
 }
 
@@ -183,55 +212,6 @@ const VERSION_LINES_VISIBLE = 2;
 // "Resubmitted" rather than "Submitted".
 function deliveryChipStatus(sub: Submission): string {
   return sub.version > 1 && sub.deliveryStatus === "submitted" ? "resubmitted" : sub.deliveryStatus;
-}
-
-// HTML for the student's revision editor: the submission text with the
-// teacher's annotations embedded as styled spans (note shown as a native
-// tooltip), so feedback stays visible inside the editable text. Uses the same
-// first-match-per-paragraph anchoring as the read-only renderer. "text"
-// annotations render the teacher's replacement (highlighted) in place of the
-// original words, exactly as submitted by the teacher; the original is kept
-// in the tooltip. Spans carry data-ann-id so the passage can be located,
-// flashed, and rewritten from the feedback card while revising.
-function annotationEditorHtml(body: string, anns: Annotation[]): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const SPAN_STYLE: Record<AnnotationType, string> = {
-    highlight: "background-color:#FF991F33;border-bottom:2px solid #FF991F;",
-    strikeout: "text-decoration:line-through;text-decoration-color:#DE350B;background-color:#FFEBE6;",
-    text: "background-color:#DEEBFF;border-bottom:2px solid #0052CC;",
-    point: "background-color:#EAE6FF;",
-  };
-  return body
-    .split("\n\n")
-    .filter(Boolean)
-    .map((para) => {
-      const hits: { start: number; end: number; ann: Annotation }[] = [];
-      for (const ann of anns) {
-        if (!ann.selectedText) continue;
-        const i = para.indexOf(ann.selectedText);
-        if (i !== -1) hits.push({ start: i, end: i + ann.selectedText.length, ann });
-      }
-      hits.sort((a, b) => a.start - b.start);
-      let html = "";
-      let pos = 0;
-      let lastEnd = 0;
-      for (const h of hits) {
-        if (h.start < lastEnd) continue;
-        html += esc(para.slice(pos, h.start));
-        const isTextEdit = h.ann.type === "text" && !!h.ann.note;
-        const shown = isTextEdit ? h.ann.note : para.slice(h.start, h.end);
-        const tip = isTextEdit
-          ? `Replaced by teacher — original: "${h.ann.selectedText}"`
-          : h.ann.note || h.ann.type;
-        html += `<span data-ann-id="${esc(h.ann.id)}" style="${SPAN_STYLE[h.ann.type]}" title="${esc(tip)}">${esc(shown)}</span>`;
-        pos = h.end;
-        lastEnd = h.end;
-      }
-      html += esc(para.slice(pos));
-      return `<p style="margin:0 0 16px">${html}</p>`;
-    })
-    .join("");
 }
 
 // Scroll-and-flash focus for annotation cards in a sidebar feed: clicking an
@@ -291,6 +271,7 @@ const LOZENGE_CFG: Record<string, { bg: string; color: string; label: string }> 
   missing:                { bg: "#FFEBE6", color: "#BF2600", label: "Not submitted" },
   excused:                { bg: "#EAE6FF", color: "#403294", label: "Excused" },
   extended:               { bg: "#E6FCFF", color: "#227D9B", label: "Extended" },
+  draft:                  { bg: "#FFFAE6", color: "#6B4E00", label: "Draft · only you" },
   not_assessed:           { bg: "#F4F5F7", color: "#42526E", label: "Not assessed" },
   not_graded:             { bg: "#FFFAE6", color: "#6B4E00", label: "Not graded" },
   resubmission_requested: { bg: "#EAE6FF", color: "#403294", label: "Resubmission req." },
@@ -2548,6 +2529,9 @@ function StudentView({
   comments,
   onSubmit,
   onResubmit,
+  onStartRevision,
+  onDraftChange,
+  onDiscardDraft,
   mobileSidebarOpen,
   onMobileSidebarClose,
 }: {
@@ -2557,29 +2541,41 @@ function StudentView({
   comments: Comment[];
   onSubmit: (id: string, body: string) => void;
   onResubmit: (id: string, body: string) => void;
+  onStartRevision: (id: string) => void;
+  onDraftChange: (id: string, body: string) => void;
+  onDiscardDraft: (id: string) => void;
   mobileSidebarOpen: boolean;
   onMobileSidebarClose: () => void;
 }) {
   const sub = submissions.find((s) => s.id === submissionId)!;
-  // Which version is on screen: null = current, otherwise an archived one.
+  // The student-only revision in progress: a next-version document nobody
+  // else can see until it is resubmitted.
+  const draftVersion = sub.draft;
+  const revising = draftVersion !== null;
+  // The version the student is working in — the draft's number while revising.
+  const currentVersionN = revising ? draftVersion!.n : sub.version;
+  // Which version is on screen: null = the current one (or the draft),
+  // otherwise a delivered version opened for comparison.
   const [viewVersion, setViewVersion] = useState<number | null>(null);
-  const viewingPast = viewVersion !== null && viewVersion !== sub.version;
-  const shownVersion = viewingPast ? viewVersion! : sub.version;
-  const shownBody = viewingPast
-    ? sub.pastVersions.find((p) => p.n === viewVersion)?.body ?? sub.body
-    : sub.body;
-  // Annotations are scoped to the version on screen.
-  const subAnns = annotations.filter(
-    (a) => a.submissionId === submissionId && a.version === shownVersion
-  );
+  const viewingPast = viewVersion !== null && viewVersion !== currentVersionN;
+  // Bodies and annotations of any delivered version — the newest one lives on
+  // the submission, older ones in pastVersions.
+  const bodyOfVersion = (n: number) =>
+    n === sub.version ? sub.body : sub.pastVersions.find((p) => p.n === n)?.body ?? sub.body;
+  const annsOfVersion = (n: number) =>
+    annotations.filter((a) => a.submissionId === submissionId && a.version === n);
+
+  const shownBody = viewingPast ? bodyOfVersion(viewVersion!) : sub.body;
+  const pastAnns = viewingPast ? annsOfVersion(viewVersion!) : [];
   const subComs = comments.filter((c) => c.submissionId === submissionId);
+  // First-submission draft (no version exists yet) — kept locally; a revision
+  // draft is persisted on the submission instead.
   const [draft, setDraft] = useState(sub.body);
-  const [revising, setRevising] = useState(false);
   const [showAllVersions, setShowAllVersions] = useState(false);
-  // A new resubmission arrived — jump back to the current version.
+  // A resubmission landed, or a draft opened/closed — reset the comparison.
   useEffect(() => {
     setViewVersion(null);
-  }, [sub.version]);
+  }, [sub.version, revising]);
 
   useEffect(() => {
     setDraft(sub.body);
@@ -2587,66 +2583,82 @@ function StudentView({
 
   // A grading action (approve / reject / request resubmission) releases feedback.
   const feedbackReleased = sub.assessmentStatus !== "not_assessed";
-  // Feedback on the current version is gated until the teacher assesses;
-  // a past version's feedback was already released before the resubmission.
-  const annsVisible = viewingPast ? subAnns : feedbackReleased ? subAnns : [];
   const feedVisible = viewingPast || feedbackReleased;
+  // Which version's feedback the sidebar lists. While revising, the draft
+  // itself carries no marks, so the sidebar keeps showing the feedback on the
+  // version being revised.
+  const sidebarVersion = viewingPast ? viewVersion! : sub.version;
+  const annsVisible = feedVisible ? annsOfVersion(sidebarVersion) : [];
   // Clicking an annotated span focuses its card in the feedback sidebar.
   const { focusedAnnId, focusAnn, registerCard } = useAnnCardFocus();
   const resubmissionOpen = sub.assessmentStatus === "resubmission_requested";
   const notSubmitted = sub.submittedAt === null;
   // Excused cancels the submission request — nothing to write or submit.
   const excused = sub.deliveryStatus === "excused";
-  // Reset the revise toggle whenever the submission is no longer open for resubmission.
-  useEffect(() => {
-    if (!resubmissionOpen) setRevising(false);
-  }, [resubmissionOpen]);
-  // Show the editor for the first draft, or when the student opts to revise after a request.
-  const showEditor = (notSubmitted && !excused) || (resubmissionOpen && revising);
+  // Show the editor for the first draft, or for an open revision draft.
+  const showEditor = (notSubmitted && !excused) || revising;
 
-  // Entering revision mode seeds the contentEditable editor once with the
-  // annotated HTML; after that the DOM owns the content so the caret is
-  // preserved while typing. `draft` mirrors its plain text via onInput.
-  const reviseEditorRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (revising && reviseEditorRef.current) {
-      const anns = annotations.filter(
-        (a) => a.submissionId === submissionId && a.version === sub.version
-      );
-      reviseEditorRef.current.innerHTML = annotationEditorHtml(sub.body, anns);
-      setDraft(sub.body);
-    }
-  }, [revising]);
-
-  const annSpanInEditor = (annId: string) =>
-    reviseEditorRef.current?.querySelector(`[data-ann-id="${annId}"]`) as HTMLElement | null;
-
-  // "Edit" pressed on a feedback card: flash the passage in the editor and
-  // hand its current text back to the card.
-  const handleAnnEditStart = (ann: Annotation): string | null => {
-    const el = annSpanInEditor(ann.id);
-    if (!el) return null;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.style.boxShadow = "0 0 0 2px #4C9AFF";
-    window.setTimeout(() => (el.style.boxShadow = ""), 1600);
-    return el.textContent;
+  // The text being edited: the persisted draft while revising, otherwise the
+  // local first-submission draft.
+  const editorText = revising ? draftVersion!.body : draft;
+  const setEditorText = (t: string) => {
+    if (revising) onDraftChange(sub.id, t);
+    else setDraft(t);
   };
+  const wordCount = editorText.trim().split(/\s+/).filter(Boolean).length;
 
-  // Save from the card: write the new text into the editor and restyle the
-  // passage as edited so progress stays visible.
-  const handleAnnEditSave = (ann: Annotation, newText: string) => {
-    const el = annSpanInEditor(ann.id);
-    if (!el) return;
-    el.textContent = newText;
-    el.setAttribute("style", "background-color:#E3FCEF;border-bottom:2px solid #36B37E;");
-    el.title = "Edited in this revision";
-    setDraft(reviseEditorRef.current?.innerText ?? "");
-  };
+  const editorTextarea = (minHeight: number) => (
+    <textarea
+      value={editorText}
+      onChange={(e) => setEditorText(e.target.value)}
+      placeholder="Write your reflection here…"
+      style={{
+        width: "100%",
+        minHeight,
+        border: "2px solid #DFE1E6",
+        borderRadius: 3,
+        padding: "14px 16px",
+        fontSize: 15,
+        resize: "vertical",
+        fontFamily: "inherit",
+        lineHeight: 1.75,
+        color: "#172B4D",
+        outline: "none",
+        boxSizing: "border-box",
+        backgroundColor: "#fff",
+      }}
+      onFocus={(e) => (e.target.style.borderColor = "#4C9AFF")}
+      onBlur={(e) => (e.target.style.borderColor = "#DFE1E6")}
+    />
+  );
 
-  const wordCount = draft
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean).length;
+  const editorFooter = (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, gap: 12, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 12, color: "#6B778C" }}>
+        {wordCount} words{" "}
+        {wordCount < 400 && (
+          <span style={{ color: "#FF991F" }}>· {400 - wordCount} more to reach minimum</span>
+        )}
+      </span>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {revising && (
+          <Btn variant="subtle" onClick={() => onDiscardDraft(sub.id)}>
+            Discard draft
+          </Btn>
+        )}
+        <Btn
+          variant="primary"
+          onClick={() => {
+            if (!editorText.trim()) return;
+            if (revising) onResubmit(sub.id, editorText);
+            else onSubmit(sub.id, editorText);
+          }}
+        >
+          {revising ? `↩ Resubmit version-${currentVersionN}` : "Submit"}
+        </Btn>
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
@@ -2666,25 +2678,35 @@ function StudentView({
           <h2 style={{ fontSize: 16, fontWeight: 700, color: "#172B4D", marginBottom: 6 }}>
             {TASK.title}
           </h2>
-          {versionLines(sub).length === 0 ? (
+          {versionLines(sub, true).length === 0 ? (
             <Lozenge status={sub.deliveryStatus} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-start" }}>
               {(showAllVersions
-                ? versionLines(sub)
-                : versionLines(sub).slice(0, VERSION_LINES_VISIBLE)
+                ? versionLines(sub, true)
+                : versionLines(sub, true).slice(0, VERSION_LINES_VISIBLE)
               ).map((v) =>
                 v.isCurrent ? (
                   <div key={v.n} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 12, color: "#172B4D", fontWeight: 600 }}>{v.label}</span>
-                    <Lozenge status={deliveryChipStatus(sub)} />
-                    <Lozenge status={sub.assessmentStatus === "not_assessed" ? "not_graded" : sub.assessmentStatus} />
+                    {v.isDraft ? (
+                      <Lozenge status="draft" />
+                    ) : (
+                      <>
+                        <Lozenge status={deliveryChipStatus(sub)} />
+                        <Lozenge status={sub.assessmentStatus === "not_assessed" ? "not_graded" : sub.assessmentStatus} />
+                      </>
+                    )}
                   </div>
                 ) : (
                   <button
                     key={v.n}
                     onClick={() => setViewVersion(v.n)}
-                    title="Open this version (read-only)"
+                    title={
+                      revising
+                        ? "Compare this version with your draft"
+                        : "Open this version (read-only)"
+                    }
                     style={{
                       background: "none",
                       border: "none",
@@ -2702,7 +2724,7 @@ function StudentView({
                   </button>
                 )
               )}
-              {versionLines(sub).length > VERSION_LINES_VISIBLE && (
+              {versionLines(sub, true).length > VERSION_LINES_VISIBLE && (
                 <button
                   onClick={() => setShowAllVersions((s) => !s)}
                   style={{
@@ -2718,19 +2740,21 @@ function StudentView({
                 >
                   {showAllVersions
                     ? "Hide previous versions"
-                    : `Display previous versions (${versionLines(sub).length - VERSION_LINES_VISIBLE})`}
+                    : `Display previous versions (${versionLines(sub, true).length - VERSION_LINES_VISIBLE})`}
                 </button>
               )}
             </div>
           )}
         </div>
 
-        {/* Past-version banner */}
+        {/* Compare banner */}
         {viewingPast && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", backgroundColor: "#FFFAE6", border: "1px solid #FFC400", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
             <span style={{ fontSize: 13, flexShrink: 0 }}>🕘</span>
             <p style={{ margin: 0, fontSize: 12, color: "#6B4E00", lineHeight: 1.5, flex: 1 }}>
-              Viewing <strong>version-{viewVersion}</strong> (read-only) with the annotations made on it.
+              Comparing <strong>version-{viewVersion}</strong> and its annotations (read-only) with{" "}
+              <strong>version-{currentVersionN}</strong>
+              {revising ? " — your draft, which you can keep editing here." : "."}
             </p>
             <button
               onClick={() => setViewVersion(null)}
@@ -2747,7 +2771,7 @@ function StudentView({
                 flexShrink: 0,
               }}
             >
-              Back to current version
+              {revising ? "Back to draft" : "Back to current version"}
             </button>
           </div>
         )}
@@ -2774,7 +2798,7 @@ function StudentView({
         )}
 
         {/* Resubmission notice — action required, so danger colors */}
-        {!viewingPast && sub.assessmentStatus === "resubmission_requested" && (
+        {!viewingPast && !revising && resubmissionOpen && (
           <div
             style={{
               backgroundColor: "#FFEBE6",
@@ -2800,107 +2824,56 @@ function StudentView({
           </div>
         )}
 
+        {/* Draft notice — the temp version is private until resubmitted */}
+        {revising && !viewingPast && (
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", backgroundColor: "#FFFAE6", border: "1px solid #FFC400", borderRadius: 4, padding: "8px 10px", marginBottom: 20 }}>
+            <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1.4 }}>✎</span>
+            <p style={{ margin: 0, fontSize: 12, color: "#6B4E00", lineHeight: 1.5, flex: 1 }}>
+              <strong>Version-{currentVersionN} is a draft only you can see.</strong> It starts as a clean
+              copy of version-{sub.version} — the teacher's marks are not carried over. Open{" "}
+              <strong>version-{sub.version}</strong> above to read them side by side. Your teacher sees
+              nothing until you resubmit.
+            </p>
+          </div>
+        )}
+
         {viewingPast ? (
-          /* ── Archived version (read-only) ── */
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-              Your submission — version-{viewVersion}
+          /* ── Side-by-side compare: the selected delivered version with its
+                annotations (left) against the version in progress (right) —
+                the draft stays editable there. ── */
+          <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#6B4E00", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                Version-{viewVersion} — annotated by your teacher
+              </div>
+              <div style={{ backgroundColor: "#fff", borderRadius: 4, border: "1px solid #DFE1E6", borderTop: "3px solid #FFC400", padding: 24 }}>
+                <AnnotatedText text={shownBody} anns={pastAnns} onAnnClick={focusAnn} />
+              </div>
             </div>
-            <div
-              style={{
-                backgroundColor: "#fff",
-                border: "1px solid #DFE1E6",
-                borderRadius: 4,
-                padding: 24,
-              }}
-            >
-              <AnnotatedText text={shownBody} anns={subAnns} onAnnClick={focusAnn} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: revising ? "#6B4E00" : "#0052CC", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                Version-{currentVersionN} — {revising ? "your draft" : "current"}
+              </div>
+              {revising ? (
+                <>
+                  {editorTextarea(260)}
+                  {editorFooter}
+                </>
+              ) : (
+                <div style={{ backgroundColor: "#fff", borderRadius: 4, border: "1px solid #DFE1E6", borderTop: "3px solid #0052CC", padding: 24 }}>
+                  <AnnotatedText text={sub.body} anns={annsOfVersion(sub.version)} onAnnClick={focusAnn} />
+                </div>
+              )}
             </div>
           </div>
         ) : showEditor ? (
           /* ── Editor mode ── */
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#42526E", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-              {revising ? "Your revised submission" : "Your submission"}
+              {revising ? `Your revised submission — version-${currentVersionN}` : "Your submission"}
             </div>
-            {revising && (
-              <p style={{ margin: "0 0 8px", fontSize: 12, color: "#6B778C", lineHeight: 1.5 }}>
-                The teacher's annotations are embedded in your text — hover one to read the note.
-                Edit the text directly; the marks disappear on resubmission.
-              </p>
-            )}
-            {revising ? (
-              /* Editable copy of the submission with the teacher's annotations
-                 embedded as styled spans. Seeded once (see effect above) so the
-                 caret is never reset while typing; plain text is read back from
-                 the DOM on every input. */
-              <div
-                ref={reviseEditorRef}
-                contentEditable
-                onInput={(e) => setDraft((e.currentTarget as HTMLElement).innerText)}
-                style={{
-                  width: "100%",
-                  minHeight: 320,
-                  border: "2px solid #DFE1E6",
-                  borderRadius: 3,
-                  padding: "14px 16px",
-                  fontSize: 15,
-                  fontFamily: "inherit",
-                  lineHeight: 1.75,
-                  color: "#172B4D",
-                  outline: "none",
-                  boxSizing: "border-box",
-                  backgroundColor: "#fff",
-                  overflowY: "auto",
-                }}
-                onFocus={(e) => ((e.currentTarget as HTMLElement).style.borderColor = "#4C9AFF")}
-                onBlur={(e) => ((e.currentTarget as HTMLElement).style.borderColor = "#DFE1E6")}
-              />
-            ) : (
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Write your reflection here…"
-                style={{
-                  width: "100%",
-                  minHeight: 320,
-                  border: "2px solid #DFE1E6",
-                  borderRadius: 3,
-                  padding: "14px 16px",
-                  fontSize: 15,
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  lineHeight: 1.75,
-                  color: "#172B4D",
-                  outline: "none",
-                  boxSizing: "border-box",
-                  backgroundColor: "#fff",
-                }}
-                onFocus={(e) => (e.target.style.borderColor = "#4C9AFF")}
-                onBlur={(e) => (e.target.style.borderColor = "#DFE1E6")}
-              />
-            )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
-              <span style={{ fontSize: 12, color: "#6B778C" }}>
-                {wordCount} words{" "}
-                {wordCount < 400 && (
-                  <span style={{ color: "#FF991F" }}>· {400 - wordCount} more to reach minimum</span>
-                )}
-              </span>
-              <Btn
-                variant="primary"
-                onClick={() => {
-                  if (!draft.trim()) return;
-                  if (sub.assessmentStatus === "resubmission_requested") {
-                    onResubmit(sub.id, draft);
-                  } else {
-                    onSubmit(sub.id, draft);
-                  }
-                }}
-              >
-                {sub.assessmentStatus === "resubmission_requested" ? "↩ Resubmit" : "Submit"}
-              </Btn>
-            </div>
+            {editorTextarea(320)}
+            {editorFooter}
           </div>
         ) : excused && !sub.body.trim() ? null : (
           /* ── Read-only submission text ── */
@@ -2920,7 +2893,7 @@ function StudentView({
             </div>
             {resubmissionOpen && (
               <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
-                <Btn variant="primary" onClick={() => setRevising(true)}>
+                <Btn variant="primary" onClick={() => onStartRevision(sub.id)}>
                   ↩ Revise &amp; resubmit
                 </Btn>
               </div>
@@ -2937,8 +2910,6 @@ function StudentView({
         released={feedVisible}
         focusedAnnId={focusedAnnId}
         registerCard={registerCard}
-        onAnnEditStart={revising && !viewingPast ? handleAnnEditStart : undefined}
-        onAnnEditSave={revising && !viewingPast ? handleAnnEditSave : undefined}
         mobileOpen={mobileSidebarOpen}
         onMobileClose={onMobileSidebarClose}
       />
@@ -3264,7 +3235,8 @@ export default function App() {
               assessmentStatus: "not_assessed",
               submittedAt: new Date().toISOString(),
               resubmissionMessage: null,
-              version: s.version + 1,
+              version: s.draft?.n ?? s.version + 1,
+              draft: null,
               pastVersions: [
                 ...s.pastVersions,
                 {
@@ -3279,6 +3251,34 @@ export default function App() {
     );
     addToast("success", "Resubmission sent!");
     addEvent(id, sub.studentId, "resubmitted");
+  };
+
+  // "Revise & resubmit": open the next version as a student-only draft, seeded
+  // with a clean copy of the delivered text (no teacher annotations carried
+  // over). Nobody else sees it until the student resubmits.
+  const handleStartRevision = (id: string) => {
+    setSubmissions((subs) =>
+      subs.map((s) =>
+        s.id !== id || s.draft
+          ? s
+          : {
+              ...s,
+              draft: { n: s.version + 1, body: s.body, startedAt: new Date().toISOString() },
+            }
+      )
+    );
+    addToast("info", "Draft version created — only you can see it until you resubmit");
+  };
+
+  const handleDraftChange = (id: string, body: string) => {
+    setSubmissions((subs) =>
+      subs.map((s) => (s.id !== id || !s.draft ? s : { ...s, draft: { ...s.draft, body } }))
+    );
+  };
+
+  const handleDiscardDraft = (id: string) => {
+    setSubmissions((subs) => subs.map((s) => (s.id !== id ? s : { ...s, draft: null })));
+    addToast("info", "Draft discarded");
   };
 
   const studentSub = submissions.find((s) => s.studentId === studentAs)!;
@@ -3645,6 +3645,9 @@ export default function App() {
             comments={comments}
             onSubmit={handleStudentSubmit}
             onResubmit={handleStudentResubmit}
+            onStartRevision={handleStartRevision}
+            onDraftChange={handleDraftChange}
+            onDiscardDraft={handleDiscardDraft}
             mobileSidebarOpen={mobileSidebarOpen}
             onMobileSidebarClose={() => setMobileSidebarOpen(false)}
           />
