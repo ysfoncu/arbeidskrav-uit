@@ -24,13 +24,14 @@ There is **no linter, no test suite, and no typecheck script** defined. There is
 
 Structure within `App.tsx`, top to bottom:
 - **Types** — `Role`, `DeliveryStatus`, `AssessmentStatus`, `AnnotationType`, and the `User` / `Submission` / `Annotation` / `Comment` interfaces.
-- **Mock data** — `USERS`, `TASK`, `SUBS_INIT`, `ANNS_INIT`, `COMS_INIT` are module-level consts seeded at the top. This is the single source of demo data (there is no separate `mockData.ts` despite the brief calling for one).
+- **Mock data** — `USERS`, `SUBS_INIT`, `ANNS_INIT`, `COMS_INIT` are module-level consts seeded at the top. This is the single source of demo data (there is no separate `mockData.ts` despite the brief calling for one).
 - **Atom components** — `Avatar`, `Lozenge`, `Btn`, `ConfirmModal`, `ToastStack`, `AudioPlayer` (mock player, no real audio).
 - **Annotation rendering** — `AnnSpan` / `renderAnnotatedPara` / `AnnotatedText`. Annotations are anchored by **substring match** (`text.indexOf(ann.selectedText)`), not by real offsets/ranges — overlapping selections are dropped.
-- **Role views** — `TeacherOverview` (sortable table), `TeacherDetail` (annotate + comment + assess + reopen), `FeedbackSidebar` (shared read-only feed), `StudentView` (write/submit/resubmit + read feedback), `SupervisorView` (read-only).
-- **`App` (default export)** — owns all state (`submissions`, `annotations`, `comments`, `toasts`, current `role`, view mode) and all mutation handlers. Renders the top nav with the **role switcher** and routes to the active role's view.
+- **Template layer** — `DEFAULT_LABELS` holds every visible string (button/chip/tab labels, headings, placeholders, notices, toasts, plus the free-text `taskInstructions`); `LABEL_GROUPS` groups them for the editor UI; `LabelsCtx` / `useLabels()` deliver them to components; `fill()` substitutes `{tokens}` and `<RichText>` renders `*bold*`. **Never hardcode a user-visible string — add a label key and a `LABEL_GROUPS` entry.** `TaskInstructions` renders the instructions on the task card in both the teacher and student views.
+- **Role views** — `TeacherOverview` (sortable table), `TeacherDetail` (annotate + comment + assess + reopen), `FeedbackSidebar` (shared read-only feed), `StudentView` (write/submit/resubmit + read feedback), `TemplateView` (live label editor), `SupervisorView` (read-only — still defined but no longer reachable: the Supervisor entry was removed from the nav).
+- **`App` (default export)** — owns all state (`submissions`, `annotations`, `comments`, `toasts`, `labels`, current `role`, view mode) and all mutation handlers. Renders the top nav with the **view switcher** (`Template` / `Teacher` / `Student`) and routes to the active view.
 
-**State model:** everything is `useState` in `App`, threaded down via props. There is no router (`react-router` is a dependency but unused), no context, no external store. Navigation is state flags: `role` (`teacher`/`student`/`supervisor`), `viewMode` (`overview`/`detail`), `selectedSubId`, etc.
+**State model:** everything is `useState` in `App`, threaded down via props — the one exception is the editable UI text, which `App` publishes through `LabelsCtx` so any component can call `useLabels()`. There is no router (`react-router` is a dependency but unused) and no external store. Navigation is state flags: `role` (`teacher`/`student`/`supervisor`), `viewMode` (`overview`/`detail`), `selectedSubId`, etc.
 
 **Two independent status axes** (do not conflate them):
 - `deliveryStatus`: `missing` | `late` | `submitted` — derived from deadline + student action.
